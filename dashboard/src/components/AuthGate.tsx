@@ -12,6 +12,8 @@ type MeResponse = {
   role: string;
 };
 
+const DEV_ADMIN_TOKEN = "dev-admin-token";
+
 export default function AuthGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -25,6 +27,12 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
         const token = localStorage.getItem('token');
         if (!token) {
           router.replace('/auth/login');
+          return;
+        }
+
+        // Dev-only fast path for local frontend work without the API server.
+        if (process.env.NODE_ENV !== 'production' && token === DEV_ADMIN_TOKEN) {
+          if (!cancelled) setReady(true);
           return;
         }
 

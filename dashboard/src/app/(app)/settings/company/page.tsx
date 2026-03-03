@@ -18,6 +18,18 @@ type Company = {
   documents?: Array<{ name: string; url: string; uploaded_at?: string }> | null;
 };
 
+const EMPTY_COMPANY: Company = {
+  id: '',
+  name: '',
+  profile_completed: false,
+  address: '',
+  phone: '',
+  gst: '',
+  pan: '',
+  logo_url: null,
+  documents: null,
+};
+
 export default function CompanySettingsPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -26,7 +38,7 @@ export default function CompanySettingsPage() {
   const [uploadingDocs, setUploadingDocs] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [company, setCompany] = useState<Company | null>(null);
+  const [company, setCompany] = useState<Company>(EMPTY_COMPANY);
 
   const token = useMemo(() => {
     try {
@@ -53,7 +65,7 @@ export default function CompanySettingsPage() {
           return;
         }
         const body = (await res.json()) as Company;
-        setCompany(body);
+        setCompany({ ...EMPTY_COMPANY, ...body });
       } catch {
         setError('Failed to load company profile');
       } finally {
@@ -118,7 +130,7 @@ export default function CompanySettingsPage() {
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.message || 'Logo upload failed');
-      setCompany((c) => (c ? { ...c, logo_url: body.logo_url } : c));
+      setCompany((c) => ({ ...c, logo_url: body.logo_url }));
       setSuccess('Logo uploaded');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Logo upload failed';
@@ -143,7 +155,7 @@ export default function CompanySettingsPage() {
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.message || 'Document upload failed');
-      setCompany((c) => (c ? { ...c, documents: body.documents } : c));
+      setCompany((c) => ({ ...c, documents: body.documents }));
       setSuccess('Documents uploaded');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Document upload failed';
@@ -154,123 +166,120 @@ export default function CompanySettingsPage() {
   }
 
   return (
-    <div className={styles.wrapper}>
+    <>
       <TopNav title="Company / Store Settings" />
 
-      {loading ? (
-        <div className={styles.muted}>Loading…</div>
-      ) : (
+      <div className={styles.content}>
         <div className={styles.card}>
-          <div className={styles.muted}>
-            Company name is required to continue. Other fields are optional and can be updated later.
-          </div>
+          {loading ? <div className={styles.muted}>Loading…</div> : null}
 
-          <form onSubmit={save}>
-            <div className={styles.grid} style={{ marginTop: 12 }}>
-              <div className={styles.field}>
-                <label>Company Name *</label>
-                <input
-                  value={company?.name || ''}
-                  onChange={(e) => setCompany((c) => ({ ...(c as Company), name: e.target.value }))}
-                  required
-                />
-              </div>
+          {!loading ? (
+            <>
+              {error ? <div className={styles.alertError}>{error}</div> : null}
+              {success ? <div className={styles.alertSuccess}>{success}</div> : null}
 
-              <div className={styles.field}>
-                <label>Phone Number</label>
-                <input
-                  value={company?.phone || ''}
-                  onChange={(e) => setCompany((c) => ({ ...(c as Company), phone: e.target.value }))}
-                />
-              </div>
+              <form onSubmit={save} className={styles.form}>
+                <div className={styles.grid}>
+                  <div className={styles.field}>
+                    <label>Company Name *</label>
+                    <input
+                      value={company.name}
+                      onChange={(e) => setCompany((c) => ({ ...c, name: e.target.value }))}
+                      required
+                    />
+                  </div>
 
-              <div className={styles.field}>
-                <label>GST (optional)</label>
-                <input
-                  value={company?.gst || ''}
-                  onChange={(e) => setCompany((c) => ({ ...(c as Company), gst: e.target.value }))}
-                />
-              </div>
+                  <div className={styles.field}>
+                    <label>Phone Number</label>
+                    <input value={company.phone || ''} onChange={(e) => setCompany((c) => ({ ...c, phone: e.target.value }))} />
+                  </div>
 
-              <div className={styles.field}>
-                <label>PAN (optional)</label>
-                <input
-                  value={company?.pan || ''}
-                  onChange={(e) => setCompany((c) => ({ ...(c as Company), pan: e.target.value }))}
-                />
-              </div>
-            </div>
+                  <div className={styles.field}>
+                    <label>GST (optional)</label>
+                    <input value={company.gst || ''} onChange={(e) => setCompany((c) => ({ ...c, gst: e.target.value }))} />
+                  </div>
 
-            <div className={styles.field} style={{ marginTop: 12 }}>
-              <label>Address</label>
-              <textarea
-                rows={3}
-                value={company?.address || ''}
-                onChange={(e) => setCompany((c) => ({ ...(c as Company), address: e.target.value }))}
-              />
-            </div>
+                  <div className={styles.field}>
+                    <label>PAN (optional)</label>
+                    <input value={company.pan || ''} onChange={(e) => setCompany((c) => ({ ...c, pan: e.target.value }))} />
+                  </div>
+                </div>
 
-            <div className={styles.row} style={{ marginTop: 12 }}>
-              <div className={styles.field}>
-                <label>Company Logo (optional)</label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  disabled={uploadingLogo}
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) uploadLogo(f);
-                  }}
-                />
-              </div>
+                <div className={styles.field}>
+                  <label>Address</label>
+                  <textarea
+                    rows={3}
+                    value={company.address || ''}
+                    onChange={(e) => setCompany((c) => ({ ...c, address: e.target.value }))}
+                  />
+                </div>
 
-              <div className={styles.field}>
-                <label>Attach Documents (optional)</label>
-                <input
-                  type="file"
-                  multiple
-                  disabled={uploadingDocs}
-                  onChange={(e) => {
-                    const fs = e.target.files;
-                    if (fs && fs.length > 0) uploadDocuments(fs);
-                  }}
-                />
-              </div>
-            </div>
+                <div className={styles.row}>
+                  <div className={styles.field}>
+                    <label>Company Logo (optional)</label>
+                    <input
+                      className={styles.fileInput}
+                      type="file"
+                      accept="image/*"
+                      disabled={uploadingLogo}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) uploadLogo(f);
+                      }}
+                    />
+                    {uploadingLogo ? <div className={styles.muted}>Uploading logo…</div> : null}
+                  </div>
 
-            {company?.logo_url ? (
-              <div className={styles.muted} style={{ marginTop: 8 }}>
-                Logo saved: {API_BASE_URL}
-                {company.logo_url}
-              </div>
-            ) : null}
+                  <div className={styles.field}>
+                    <label>Attach Documents (optional)</label>
+                    <input
+                      className={styles.fileInput}
+                      type="file"
+                      multiple
+                      disabled={uploadingDocs}
+                      onChange={(e) => {
+                        const fs = e.target.files;
+                        if (fs && fs.length > 0) uploadDocuments(fs);
+                      }}
+                    />
+                    {uploadingDocs ? <div className={styles.muted}>Uploading documents…</div> : null}
+                  </div>
+                </div>
 
-            {company?.documents && company.documents.length > 0 ? (
-              <div style={{ marginTop: 10 }}>
-                <div className={styles.muted}>Uploaded documents:</div>
-                <ul style={{ marginTop: 6, paddingLeft: 18 }}>
-                  {company.documents.map((d) => (
-                    <li key={d.url}>
-                      <a href={`${API_BASE_URL}${d.url}`} target="_blank" rel="noreferrer">
-                        {d.name}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
+                {company.logo_url ? (
+                  <div className={styles.inlineMeta}>
+                    <span className={styles.muted}>Logo saved:</span>
+                    <a className={styles.link} href={`${API_BASE_URL}${company.logo_url}`} target="_blank" rel="noreferrer">
+                      View
+                    </a>
+                  </div>
+                ) : null}
 
-            <div className={styles.actions}>
-              <button className={styles.primary} type="submit" disabled={saving}>
-                {saving ? 'Saving…' : 'Save & Continue'}
-              </button>
-            </div>
-          </form>
+                {company.documents && company.documents.length > 0 ? (
+                  <div className={styles.docs}>
+                    <div className={styles.muted}>Uploaded documents</div>
+                    <ul className={styles.docList}>
+                      {company.documents.map((d) => (
+                        <li key={d.url}>
+                          <a className={styles.link} href={`${API_BASE_URL}${d.url}`} target="_blank" rel="noreferrer">
+                            {d.name}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
 
-          {error ? <div className={styles.error}>{error}</div> : null}
-          {success ? <div className={styles.success}>{success}</div> : null}
+                <div className={styles.actions}>
+                  <button className={styles.primary} type="submit" disabled={saving}>
+                    {saving ? 'Saving…' : 'Save & Continue'}
+                  </button>
+                </div>
+              </form>
+            </>
+          ) : null}
         </div>
-      )}
-    </div>
+      </div>
+    </>
   );
 }
