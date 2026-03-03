@@ -1,0 +1,56 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { usePathname } from 'next/navigation';
+import { API_BASE_URL } from '@/lib/api';
+
+type MeResponse = {
+  id: string;
+  username?: string;
+  email?: string;
+  role: string;
+};
+
+export default function AuthGate({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function run() {
+      try {
+        const token = localStorage.getItem('token');
+        if (!token) {
+          router.replace('/auth/login');
+          return;
+        }
+
+        const meRes = await fetch(`${API_BASE_URL}/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!meRes.ok) {
+          localStorage.removeItem('token');
+          router.replace('/auth/login');
+          return;
+        }
+        const me = (await meRes.json()) as MeResponse;
+        if (!cancelled) setReady(true);
+      } catch {
+        localStorage.removeItem('token');
+        router.replace('/auth/login');
+      }
+    }
+
+    run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [router, pathname]);
+
+  if (!ready) return null;
+  return <>{children}</>;
+}

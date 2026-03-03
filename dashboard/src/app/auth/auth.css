@@ -1,0 +1,12 @@
+.auth-root {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, #020617 0%, #061025 100%);
+}
+
+/* Make sure children can control width (page uses its own module) */
+.auth-root > * {
+  width: 100%;
+}

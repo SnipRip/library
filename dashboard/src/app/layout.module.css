@@ -1,0 +1,46 @@
+.container {
+    display: flex;
+    height: 100vh;
+    gap: 0.5rem;
+    padding: 0.5rem;
+    background-color: #f1f5f9;
+    /* Outer background - slightly darker */
+    overflow: hidden;
+    /* Prevent body scroll, handle scroll in islands */
+}
+
+.mainContent {
+    flex: 1;
+    background-color: #fff;
+    /* Paper white */
+    border-radius: 0.75rem;
+    /* Matches gap/padding */
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05);
+    /* Soft shadow */
+    overflow: hidden;
+    /* Ensure content respects radius */
+    min-height: 0;
+    /* Allow flex child to shrink properly */
+}
+
+/* When auth-mode is active we want full-bleed auth pages (no side gaps) */
+#root-container.auth-mode {
+    gap: 0;
+    padding: 0;
+    background-color: transparent;
+    /* Force full-bleed layout to cover the viewport so auth pages have no visible margins */
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 50;
+}
+
+#root-container.auth-mode .mainContent {
+    background: transparent;
+    border-radius: 0;
+    box-shadow: none;
+    overflow: visible;
+}
