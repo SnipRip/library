@@ -14,6 +14,20 @@ interface Seat {
     occupied_until?: string | null;
 }
 
+async function loadSeats(setSeats: React.Dispatch<React.SetStateAction<Seat[]>>) {
+    try {
+        const token = localStorage.getItem('token');
+        const res = await fetch(`${API_BASE_URL}/library/seats`, {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const body = await res.json();
+        setSeats(Array.isArray(body) ? body : []);
+    } catch (err) {
+        console.error(err);
+    }
+}
+
 export default function LibraryPage() {
     const [activeShift, setActiveShift] = useState('Full Day');
     const [selectedSeat, setSelectedSeat] = useState<Seat | null>(null);
@@ -22,22 +36,8 @@ export default function LibraryPage() {
     const [isSeatModalOpen, setIsSeatModalOpen] = useState(false);
     const [isHallModalOpen, setIsHallModalOpen] = useState(false);
 
-    async function fetchSeats() {
-        try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`${API_BASE_URL}/library/seats`, {
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            if (!res.ok) return;
-            const body = await res.json();
-            setSeats(Array.isArray(body) ? body : []);
-        } catch (err) {
-            console.error(err);
-        }
-    }
-
     useEffect(() => {
-        fetchSeats();
+        void loadSeats(setSeats);
     }, []);
 
     async function updateSeatStatus(seatId: string, status: Seat['status']) {
@@ -48,7 +48,7 @@ export default function LibraryPage() {
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                 body: JSON.stringify({ status }),
             });
-            await fetchSeats();
+            await loadSeats(setSeats);
         } catch (err) {
             console.error(err);
         }
@@ -61,7 +61,7 @@ export default function LibraryPage() {
                 method: 'POST',
                 headers: { Authorization: `Bearer ${token}` },
             });
-            await fetchSeats();
+            await loadSeats(setSeats);
         } catch (err) {
             console.error(err);
         }
@@ -112,7 +112,7 @@ export default function LibraryPage() {
                 <AddSeatModal
                     isOpen={isSeatModalOpen}
                     onClose={() => setIsSeatModalOpen(false)}
-                    onCreated={fetchSeats}
+                    onCreated={() => loadSeats(setSeats)}
                 />
 
                 <AddHallModal

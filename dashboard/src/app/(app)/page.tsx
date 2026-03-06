@@ -3,7 +3,6 @@
 import { useState } from "react";
 import TopNav from "@/components/TopNav";
 import styles from "./page.module.css";
-import StatCard from "@/components/StatCard";
 import { AddStudentModal } from "@/components/modals/Modals";
 
 import SeatStatus from "@/components/dashboard/SeatStatus";

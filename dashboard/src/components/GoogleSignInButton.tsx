@@ -4,9 +4,37 @@ import { useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { API_BASE_URL } from '@/lib/api';
 
+type GoogleCredentialResponse = {
+  credential?: string;
+};
+
+type GoogleIdInitializeOptions = {
+  client_id: string;
+  callback: (resp: GoogleCredentialResponse) => void;
+};
+
+type GoogleIdRenderButtonOptions = {
+  theme?: 'outline' | 'filled_blue' | 'filled_black';
+  size?: 'large' | 'medium' | 'small';
+  width?: number;
+};
+
+type GoogleAccountsId = {
+  initialize: (options: GoogleIdInitializeOptions) => void;
+  renderButton: (parent: HTMLElement, options: GoogleIdRenderButtonOptions) => void;
+};
+
+type GoogleAccounts = {
+  id: GoogleAccountsId;
+};
+
+type GoogleIdentity = {
+  accounts: GoogleAccounts;
+};
+
 declare global {
   interface Window {
-    google?: any;
+    google?: GoogleIdentity;
   }
 }
 
@@ -51,7 +79,7 @@ export default function GoogleSignInButton({
       try {
         window.google.accounts.id.initialize({
           client_id: clientId,
-          callback: async (resp: any) => {
+          callback: async (resp: GoogleCredentialResponse) => {
             try {
               const credential = resp?.credential;
               if (!credential) {

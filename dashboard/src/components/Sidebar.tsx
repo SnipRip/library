@@ -2,11 +2,16 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useState } from 'react';
 import styles from './Sidebar.module.css';
 import { brandConfig } from '@/lib/config';
 
 export default function Sidebar() {
     const pathname = usePathname();
+
+    const isReportsRoute = !!(pathname && pathname.startsWith('/reports'));
+    const [reportsOpen, setReportsOpen] = useState(isReportsRoute);
+    const reportsExpanded = reportsOpen || isReportsRoute;
 
     const isActive = (path: string) => {
         if (path === '/' && pathname === '/') return true;
@@ -96,12 +101,40 @@ export default function Sidebar() {
                 )}
                 {brandConfig.modules.reports && (
                     <li className={styles.menuItem}>
-                        <a href="#" className={styles.menuLink}>
+                        <button
+                            type="button"
+                            className={`${styles.menuLink} ${styles.menuButton} ${isActive('/reports') ? styles.menuLinkActive : ''}`}
+                            onClick={() => setReportsOpen((v) => !v)}
+                            aria-expanded={reportsExpanded}
+                            aria-controls="sidebar-reports"
+                        >
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className={styles.icon}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                             </svg>
-                            Reports
-                        </a>
+                            <span className={styles.menuButtonLabel}>Reports</span>
+                            <svg
+                                className={`${styles.chevron} ${reportsExpanded ? styles.chevronOpen : ''}`}
+                                xmlns="http://www.w3.org/2000/svg"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                        </button>
+
+                        {reportsExpanded && (
+                            <ul id="sidebar-reports" className={styles.subMenuList}>
+                                <li className={styles.subMenuItem}>
+                                    <Link
+                                        href="/reports/balance-sheet"
+                                        className={`${styles.subMenuLink} ${isActive('/reports/balance-sheet') ? styles.subMenuLinkActive : ''}`}
+                                    >
+                                        Balance Sheet
+                                    </Link>
+                                </li>
+                            </ul>
+                        )}
                     </li>
                 )}
             </ul>

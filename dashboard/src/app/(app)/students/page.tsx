@@ -16,27 +16,27 @@ interface Student {
     created_at: string;
 }
 
+async function loadStudents(setStudents: React.Dispatch<React.SetStateAction<Student[]>>) {
+    try {
+        const token = localStorage.getItem('token');
+        const res = await fetch(`${API_BASE_URL}/students`, {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const body = await res.json();
+        setStudents(Array.isArray(body) ? body : []);
+    } catch (err) {
+        console.error(err);
+    }
+}
+
 export default function StudentsPage() {
     const [students, setStudents] = useState<Student[]>([]);
     const [searchTerm, setSearchTerm] = useState("");
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
 
-    async function fetchStudents() {
-        try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`${API_BASE_URL}/students`, {
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            if (!res.ok) return;
-            const body = await res.json();
-            setStudents(Array.isArray(body) ? body : []);
-        } catch (err) {
-            console.error(err);
-        }
-    }
-
     useEffect(() => {
-        fetchStudents();
+        void loadStudents(setStudents);
     }, []);
 
     const filteredStudents = students.filter(s =>
@@ -71,7 +71,7 @@ export default function StudentsPage() {
                 <AddStudentModal
                     isOpen={isAddModalOpen}
                     onClose={() => setIsAddModalOpen(false)}
-                    onCreated={fetchStudents}
+                    onCreated={() => loadStudents(setStudents)}
                 />
 
                 <div className={styles.tableContainer}>

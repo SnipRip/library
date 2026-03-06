@@ -5,13 +5,6 @@ import { useRouter } from "next/navigation";
 import { usePathname } from 'next/navigation';
 import { API_BASE_URL } from '@/lib/api';
 
-type MeResponse = {
-  id: string;
-  username?: string;
-  email?: string;
-  role: string;
-};
-
 const DEV_ADMIN_TOKEN = "dev-admin-token";
 
 export default function AuthGate({ children }: { children: React.ReactNode }) {
@@ -44,7 +37,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
           router.replace('/auth/login');
           return;
         }
-        const me = (await meRes.json()) as MeResponse;
+        await meRes.json().catch(() => null);
         if (!cancelled) setReady(true);
       } catch {
         localStorage.removeItem('token');

@@ -47,15 +47,6 @@
   --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-bg-light: #0f172a;
-    --color-bg-white: #1e293b;
-    --color-text-primary: #f3f4f6;
-    --color-text-secondary: #9ca3af;
-  }
-}
-
 html {
   /* Scales all rem-based sizes proportionally — matches the 80% browser zoom look at 100% */
   font-size: 90%;
