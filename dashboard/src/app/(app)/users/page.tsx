@@ -1,163 +1,221 @@
 "use client";
 
-import { useEffect, useState } from 'react';
-import PasswordStrength from '@/components/PasswordStrength';
-import { API_BASE_URL } from '@/lib/api';
+import { useMemo, useState } from 'react';
+import TopNav from '@/components/TopNav';
+import styles from './page.module.css';
+import { AddUserModal } from '@/components/modals/Modals';
 
-type User = { id: string; email: string; role: string; created_at: string };
+type User = {
+  id: string;
+  username: string;
+  email: string;
+  default_password: string;
+  original_name?: string;
+  first_name?: string;
+  last_name?: string;
+  address?: string;
+  phone?: string;
+  alternate_phone?: string;
+  pan?: string;
+  aadhar?: string;
+  documents?: Array<{ name: string; type: string; size: number; lastModified: number }>;
+  role: string;
+  created_at: string;
+};
+
+const STORAGE_KEY = 'aedify.users';
+
+function makeId() {
+  try {
+    const uuid = globalThis.crypto?.randomUUID?.();
+    if (uuid) return uuid;
+  } catch {
+    // ignore
+  }
+  return `u_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
 
 export default function UsersPage() {
-  const [users, setUsers] = useState<User[]>([]);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [role, setRole] = useState('user');
-  const [loading, setLoading] = useState(false);
-  const [addError, setAddError] = useState('');
-
-  async function fetchUsers() {
+  const [users, setUsers] = useState<User[]>(() => {
     try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`${API_BASE_URL}/users`, { headers: { Authorization: `Bearer ${token}` } });
-      const body = await res.json();
-      setUsers(body);
-    } catch (err) {
-      console.error(err);
+      if (typeof window === 'undefined') return [];
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) return [];
+
+      return parsed
+        .filter((u) => u && typeof u === 'object')
+        .map((u) => {
+          const obj = u as Record<string, unknown>;
+          const docs = Array.isArray(obj.documents)
+            ? (obj.documents as unknown[])
+                .filter((d) => d && typeof d === 'object')
+                .map((d) => {
+                  const doc = d as Record<string, unknown>;
+                  return {
+                    name: typeof doc.name === 'string' ? doc.name : 'document',
+                    type: typeof doc.type === 'string' ? doc.type : 'application/octet-stream',
+                    size: typeof doc.size === 'number' ? doc.size : 0,
+                    lastModified: typeof doc.lastModified === 'number' ? doc.lastModified : 0,
+                  };
+                })
+            : [];
+
+          return {
+            id: typeof obj.id === 'string' ? obj.id : makeId(),
+            username: typeof obj.username === 'string' ? obj.username : '',
+            email: typeof obj.email === 'string' ? obj.email : '',
+            default_password: typeof obj.default_password === 'string' ? obj.default_password : '',
+            original_name: typeof obj.original_name === 'string' ? obj.original_name : '',
+            first_name: typeof obj.first_name === 'string' ? obj.first_name : '',
+            last_name: typeof obj.last_name === 'string' ? obj.last_name : '',
+            address: typeof obj.address === 'string' ? obj.address : '',
+            phone: typeof obj.phone === 'string' ? obj.phone : '',
+            alternate_phone: typeof obj.alternate_phone === 'string' ? obj.alternate_phone : '',
+            pan: typeof obj.pan === 'string' ? obj.pan : '',
+            aadhar: typeof obj.aadhar === 'string' ? obj.aadhar : '',
+            documents: docs,
+            role: typeof obj.role === 'string' ? obj.role : 'user',
+            created_at: typeof obj.created_at === 'string' ? obj.created_at : new Date().toISOString(),
+          } satisfies User;
+        })
+        .filter((u) => !!u.username && !!u.email);
+    } catch {
+      return [];
+    }
+  });
+  const [isAddOpen, setIsAddOpen] = useState(false);
+
+  const sortedUsers = useMemo(() => {
+    return [...users].sort((a, b) => {
+      const at = new Date(a.created_at).getTime();
+      const bt = new Date(b.created_at).getTime();
+      return bt - at;
+    });
+  }, [users]);
+
+  function persist(next: User[]) {
+    setUsers(next);
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      // ignore
     }
   }
 
-  useEffect(() => {
-    fetchUsers();
-  }, []);
+  function handleCreateUser(payload: {
+    username: string;
+    email: string;
+    default_password: string;
+    original_name: string;
+    first_name: string;
+    last_name: string;
+    address: string;
+    phone: string;
+    alternate_phone: string;
+    pan: string;
+    aadhar: string;
+    documents: Array<{ name: string; type: string; size: number; lastModified: number }>;
+    role: string;
+  }) {
+    const username = payload.username.trim();
+    const email = payload.email.trim();
 
-  async function addUser(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setLoading(true);
-    // client-side validation
-    const val = email;
-    const isEmail = val.includes('@');
-    const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    const usernameRe = /^[A-Za-z0-9@._-]{3,64}$/;
-    if (!val || (isEmail ? !emailRe.test(val) : !usernameRe.test(val))) {
-      alert('Invalid username/email');
-      setLoading(false);
+    if (!username || !email || !payload.default_password) {
+      alert('Username, Email, and Default Password are required');
       return;
     }
-    if (!(password.length >= 8 && /[A-Z]/.test(password) && /[a-z]/.test(password) && /[0-9]/.test(password) && /[^A-Za-z0-9]/.test(password))) {
-      setLoading(false);
-      setAddError('Password must be >=8 chars and include upper, lower, digit and special');
+
+    const exists = users.some(
+      (u) => u.username.toLowerCase() === username.toLowerCase() || u.email.toLowerCase() === email.toLowerCase(),
+    );
+    if (exists) {
+      alert('User already exists');
       return;
     }
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`${API_BASE_URL}/users`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ email, password, role }),
-      });
-      if (!res.ok) {
-        const b = await res.json();
-        setAddError(b.message || 'Failed to add user');
-        setLoading(false);
-        return;
-      }
-      setEmail('');
-      setPassword('');
-      setRole('user');
-      setAddError('');
-      await fetchUsers();
-    } catch {
-      setAddError('Failed to add user');
-    } finally {
-      setLoading(false);
-    }
-  }
 
-  async function changePassword(userId: string) {
-    const p = prompt('Enter new password for user');
-    if (!p) return;
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`${API_BASE_URL}/users/${userId}/password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ password: p }),
-      });
-      if (!res.ok) throw new Error('failed');
-      alert('Password updated');
-    } catch {
-      alert('Failed to update password');
-    }
-  }
+    const newUser: User = {
+      id: makeId(),
+      username,
+      email,
+      default_password: payload.default_password,
+      original_name: payload.original_name,
+      first_name: payload.first_name,
+      last_name: payload.last_name,
+      address: payload.address,
+      phone: payload.phone,
+      alternate_phone: payload.alternate_phone,
+      pan: payload.pan,
+      aadhar: payload.aadhar,
+      documents: payload.documents,
+      role: payload.role,
+      created_at: new Date().toISOString(),
+    };
 
-  async function editUser(userId: string, currentEmail: string) {
-    const newEmail = prompt('Enter new username/email', currentEmail);
-    if (!newEmail || newEmail === currentEmail) return;
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`${API_BASE_URL}/users/${userId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ email: newEmail }),
-      });
-      if (res.status === 409) {
-        alert('Username already taken');
-        return;
-      }
-      if (!res.ok) throw new Error('failed');
-      await fetchUsers();
-      alert('Updated');
-    } catch {
-      alert('Failed to update user');
-    }
+    persist([newUser, ...users]);
   }
 
   return (
-    <div style={{ padding: 20 }}>
-      <h2>User Management</h2>
-      <form onSubmit={addUser} style={{ marginBottom: 16 }}>
-        <input placeholder="Email or username" value={email} onChange={(e) => setEmail(e.target.value)} />
-        <input placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} />
-        <PasswordStrength password={password} />
-        <select value={role} onChange={(e) => setRole(e.target.value)}>
-          <option value="user">user</option>
-          <option value="admin">admin</option>
-          <option value="owner">owner</option>
-        </select>
-        <button type="submit" disabled={loading}>
-          Add user
-        </button>
-        {addError && (
-          <div style={{ color: 'red', marginTop: 8 }}>
-            {addError}
-          </div>
-        )}
-      </form>
+    <>
+      <TopNav title="Users" />
 
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead>
-          <tr>
-            <th>Email</th>
-            <th>Role</th>
-            <th>Created</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {users.map((u) => (
-            <tr key={u.id}>
-              <td>{u.email}</td>
-              <td>{u.role}</td>
-              <td>{new Date(u.created_at).toLocaleString()}</td>
-              <td>
-                <button onClick={() => changePassword(u.id)}>Change Password</button>
-                <button onClick={() => editUser(u.id, u.email)} style={{ marginLeft: 8 }}>
-                  Edit
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+      <div className={styles.content}>
+        <div className={styles.header}>
+          <h1 className={styles.title}>Users</h1>
+          <div className={styles.controls}>
+            <button className={styles.addButton} onClick={() => setIsAddOpen(true)}>
+              <span>+</span> Add User
+            </button>
+          </div>
+        </div>
+
+        <AddUserModal
+          isOpen={isAddOpen}
+          onClose={() => setIsAddOpen(false)}
+          onCreate={(payload) => {
+            handleCreateUser(payload);
+            setIsAddOpen(false);
+          }}
+        />
+
+        <div className={styles.tableContainer}>
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th>USERNAME</th>
+                <th>NAME</th>
+                <th>EMAIL</th>
+                <th>PHONE</th>
+                <th>PAN</th>
+                <th>AADHAAR</th>
+                <th>ROLE</th>
+                <th>CREATED</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedUsers.map((u) => (
+                <tr key={u.id}>
+                  <td style={{ fontWeight: 700 }}>{u.username}</td>
+                  <td>{`${u.first_name || ''} ${u.last_name || ''}`.trim() || '-'}</td>
+                  <td style={{ fontWeight: 600 }}>{u.email}</td>
+                  <td>{u.phone || '-'}</td>
+                  <td>{u.pan || '-'}</td>
+                  <td>{u.aadhar || '-'}</td>
+                  <td>
+                    <span className={styles.roleBadge}>{u.role}</span>
+                  </td>
+                  <td>{new Date(u.created_at).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {sortedUsers.length === 0 ? (
+            <div className={styles.emptyState}>No users added yet. Click “Add User” to create one.</div>
+          ) : null}
+        </div>
+      </div>
+    </>
   );
 }

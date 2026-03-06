@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import styles from './Modal.module.css';
 import { API_BASE_URL } from '@/lib/api';
 
@@ -264,6 +264,264 @@ export function AddBatchModal({ isOpen, onClose }: AddBatchModalProps) {
             <div className={styles.inputGroup}>
                 <label className={styles.label}>Monthly Fee (₹)</label>
                 <input type="number" className={styles.input} placeholder="e.g. 1000" required />
+            </div>
+        </BaseModal>
+    );
+}
+
+interface AddUserModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+    onCreate: (payload: {
+        username: string;
+        email: string;
+        default_password: string;
+        original_name: string;
+        first_name: string;
+        last_name: string;
+        address: string;
+        phone: string;
+        alternate_phone: string;
+        pan: string;
+        aadhar: string;
+        documents: Array<{ name: string; type: string; size: number; lastModified: number }>;
+        role: string;
+    }) => void;
+}
+
+export function AddUserModal({ isOpen, onClose, onCreate }: AddUserModalProps) {
+    const [username, setUsername] = useState('');
+    const [email, setEmail] = useState('');
+    const [defaultPassword, setDefaultPassword] = useState('');
+    const [originalName, setOriginalName] = useState('');
+    const [firstName, setFirstName] = useState('');
+    const [lastName, setLastName] = useState('');
+    const [address, setAddress] = useState('');
+    const [phone, setPhone] = useState('');
+    const [alternatePhone, setAlternatePhone] = useState('');
+    const [pan, setPan] = useState('');
+    const [aadhar, setAadhar] = useState('');
+    const [role, setRole] = useState('user');
+    const [files, setFiles] = useState<File[]>([]);
+    const [fileInputKey, setFileInputKey] = useState(0);
+
+    const resetForm = () => {
+        setUsername('');
+        setEmail('');
+        setDefaultPassword('');
+        setOriginalName('');
+        setFirstName('');
+        setLastName('');
+        setAddress('');
+        setPhone('');
+        setAlternatePhone('');
+        setPan('');
+        setAadhar('');
+        setRole('user');
+        setFiles([]);
+        setFileInputKey((k) => k + 1);
+    };
+
+    const handleClose = () => {
+        resetForm();
+        onClose();
+    };
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        const u = username.trim();
+        const em = email.trim();
+        const pwd = defaultPassword;
+
+        if (!u || !em || !pwd) {
+            alert('Username, Email and Default Password are required');
+            return;
+        }
+
+        onCreate({
+            username: u,
+            email: em,
+            default_password: pwd,
+            original_name: originalName.trim(),
+            first_name: firstName.trim(),
+            last_name: lastName.trim(),
+            address: address.trim(),
+            phone: phone.trim(),
+            alternate_phone: alternatePhone.trim(),
+            pan: pan.trim(),
+            aadhar: aadhar.trim(),
+            documents: files.map((f) => ({
+                name: f.name,
+                type: f.type || 'application/octet-stream',
+                size: f.size,
+                lastModified: f.lastModified,
+            })),
+            role,
+        });
+
+        resetForm();
+    };
+
+    return (
+        <BaseModal
+            isOpen={isOpen}
+            onClose={handleClose}
+            title="Add New User"
+            onSubmit={handleSubmit}
+            submitLabel="Create User"
+        >
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className={styles.inputGroup}>
+                    <label className={styles.label}>Username *</label>
+                    <input
+                        type="text"
+                        className={styles.input}
+                        placeholder="e.g. staff01"
+                        required
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value)}
+                    />
+                </div>
+
+                <div className={styles.inputGroup}>
+                    <label className={styles.label}>Email *</label>
+                    <input
+                        type="email"
+                        className={styles.input}
+                        placeholder="e.g. staff@school.edu"
+                        required
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                    />
+                </div>
+            </div>
+
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Default Password *</label>
+                <input
+                    type="text"
+                    className={styles.input}
+                    placeholder="Provide default password"
+                    required
+                    value={defaultPassword}
+                    onChange={(e) => setDefaultPassword(e.target.value)}
+                />
+            </div>
+
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Original Name</label>
+                <input
+                    type="text"
+                    className={styles.input}
+                    placeholder="Name as on documents"
+                    value={originalName}
+                    onChange={(e) => setOriginalName(e.target.value)}
+                />
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className={styles.inputGroup}>
+                    <label className={styles.label}>First Name</label>
+                    <input
+                        type="text"
+                        className={styles.input}
+                        placeholder="First name"
+                        value={firstName}
+                        onChange={(e) => setFirstName(e.target.value)}
+                    />
+                </div>
+                <div className={styles.inputGroup}>
+                    <label className={styles.label}>Last Name</label>
+                    <input
+                        type="text"
+                        className={styles.input}
+                        placeholder="Last name"
+                        value={lastName}
+                        onChange={(e) => setLastName(e.target.value)}
+                    />
+                </div>
+            </div>
+
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Address</label>
+                <textarea
+                    className={styles.textarea}
+                    placeholder="Address"
+                    value={address}
+                    onChange={(e) => setAddress(e.target.value)}
+                    rows={3}
+                />
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className={styles.inputGroup}>
+                    <label className={styles.label}>Phone Number</label>
+                    <input
+                        type="tel"
+                        className={styles.input}
+                        placeholder="e.g. 9876543210"
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                    />
+                </div>
+                <div className={styles.inputGroup}>
+                    <label className={styles.label}>Alternate Number</label>
+                    <input
+                        type="tel"
+                        className={styles.input}
+                        placeholder="Optional"
+                        value={alternatePhone}
+                        onChange={(e) => setAlternatePhone(e.target.value)}
+                    />
+                </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className={styles.inputGroup}>
+                    <label className={styles.label}>PAN No.</label>
+                    <input
+                        type="text"
+                        className={styles.input}
+                        placeholder="e.g. ABCDE1234F"
+                        value={pan}
+                        onChange={(e) => setPan(e.target.value)}
+                    />
+                </div>
+                <div className={styles.inputGroup}>
+                    <label className={styles.label}>Aadhaar No.</label>
+                    <input
+                        type="text"
+                        className={styles.input}
+                        placeholder="e.g. 1234 5678 9012"
+                        value={aadhar}
+                        onChange={(e) => setAadhar(e.target.value)}
+                    />
+                </div>
+            </div>
+
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Attachments (multiple)</label>
+                <input
+                    key={fileInputKey}
+                    type="file"
+                    multiple
+                    className={styles.input}
+                    onChange={(e) => setFiles(Array.from(e.target.files || []))}
+                />
+                {files.length > 0 ? (
+                    <div style={{ fontSize: '0.85rem', color: '#64748b' }}>
+                        Selected: {files.map((f) => f.name).join(', ')}
+                    </div>
+                ) : null}
+            </div>
+
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Role</label>
+                <select className={styles.select} value={role} onChange={(e) => setRole(e.target.value)}>
+                    <option value="user">user</option>
+                    <option value="admin">admin</option>
+                    <option value="owner">owner</option>
+                </select>
             </div>
         </BaseModal>
     );

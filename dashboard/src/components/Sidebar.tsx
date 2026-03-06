@@ -156,6 +156,24 @@ export default function Sidebar() {
                         Company Settings
                     </Link>
                 </li>
+
+                <li className={styles.menuItem}>
+                    <Link href="/users" className={`${styles.menuLink} ${isActive('/users') ? styles.menuLinkActive : ''}`}>
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className={styles.icon}>
+                            <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="M17 20h5v-1a4 4 0 00-4-4h-1m-4 5H6a4 4 0 01-4-4v-1a4 4 0 014-4h7a4 4 0 014 4v1a4 4 0 01-4 4z"
+                            />
+                            <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="M9 11a4 4 0 100-8 4 4 0 000 8zm10-1a3 3 0 10-6 0 3 3 0 006 0z"
+                            />
+                        </svg>
+                        Users
+                    </Link>
+                </li>
             </ul>
 
             <div className={styles.spacer}></div>

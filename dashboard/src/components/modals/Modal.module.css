@@ -101,6 +101,16 @@
     width: 100%;
 }
 
+.textarea {
+    width: 100%;
+    padding: 0.75rem 0.875rem;
+    border-radius: 0.5rem;
+    border: 1px solid #e2e8f0;
+    background: #fff;
+    outline: none;
+    resize: vertical;
+}
+
 .input:focus,
 .select:focus {
     outline: none;
