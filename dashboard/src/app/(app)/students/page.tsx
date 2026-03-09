@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 import styles from './page.module.css';
 import TopNav from '@/components/TopNav';
 import { AddStudentModal } from '@/components/modals/Modals';
-import { API_BASE_URL } from '@/lib/api';
 
 // Mock Data
 interface Student {
@@ -19,10 +18,14 @@ interface Student {
 async function loadStudents(setStudents: React.Dispatch<React.SetStateAction<Student[]>>) {
     try {
         const token = localStorage.getItem('token');
-        const res = await fetch(`${API_BASE_URL}/students`, {
+        const res = await fetch(`/api/students`, {
             headers: { Authorization: `Bearer ${token}` },
         });
-        if (!res.ok) return;
+        if (!res.ok) {
+            const details = await res.text().catch(() => '');
+            console.error('Failed to load students', res.status, details);
+            return;
+        }
         const body = await res.json();
         setStudents(Array.isArray(body) ? body : []);
     } catch (err) {
