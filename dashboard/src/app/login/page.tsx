@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import styles from "../auth/login/login.module.css";
 import { DottedGlowBackground } from "@/components/ui/dotted-glow-background";
+import { API_BASE_URL } from "@/lib/api";
 
 export default function LoginPageStandalone() {
   const [email, setEmail] = useState("");
@@ -18,7 +19,7 @@ export default function LoginPageStandalone() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/auth/login", {
+      const res = await fetch(`${API_BASE_URL}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),

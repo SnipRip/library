@@ -1,0 +1,26 @@
+{
+  "name": "aedify-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npm run db:bootstrap && tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "db:bootstrap": "tsx src/db/bootstrap.ts",
+    "lint": "echo \"(no lint configured yet)\""
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.1.0",
+    "dotenv": "^16.6.1",
+    "fastify": "^5.6.0",
+    "pg": "^8.16.3",
+    "zod": "^4.1.9"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "@types/pg": "^8.15.5",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}

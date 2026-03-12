@@ -83,7 +83,7 @@ export function AddStudentModal({ isOpen, onClose, availableClasses = [], onCrea
                 class: selectedClass ? Number(selectedClass) : undefined,
             };
 
-            const res = await fetch(`/api/students`, {
+            const res = await fetch(`${API_BASE_URL}/students`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
