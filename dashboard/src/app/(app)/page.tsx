@@ -1,23 +1,67 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import TopNav from "@/components/TopNav";
 import styles from "./page.module.css";
 import { AddStudentModal } from "@/components/modals/Modals";
 
 import SeatStatus from "@/components/dashboard/SeatStatus";
+import { API_BASE_URL } from "@/lib/api";
 
-// This mock data simulates fetching active classes from the DB
-const MOCK_AVAILABLE_CLASSES = [
-  { id: 6, name: "Class 6" },
-  { id: 7, name: "Class 7" },
-  { id: 8, name: "Class 8" },
-  { id: 9, name: "Class 9" },
-  { id: 10, name: "Class 10" },
-];
+type Seat = {
+  id: string;
+  seat_number: string;
+  status: "available" | "occupied" | "maintenance";
+};
+
+type ClassRow = {
+  id: string;
+  name: string;
+  status: string;
+};
 
 export default function Dashboard() {
   const [isStudentModalOpen, setIsStudentModalOpen] = useState(false);
+  const [seatCounts, setSeatCounts] = useState<{ occupied: number; total: number }>({ occupied: 0, total: 0 });
+  const [activeClassCount, setActiveClassCount] = useState<number>(0);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadOverview() {
+      try {
+        const token = localStorage.getItem("token");
+        if (!token) return;
+
+        const [seatsRes, classesRes] = await Promise.all([
+          fetch(`${API_BASE_URL}/library/seats`, { headers: { Authorization: `Bearer ${token}` } }),
+          fetch(`${API_BASE_URL}/classes`, { headers: { Authorization: `Bearer ${token}` } }),
+        ]);
+
+        if (seatsRes.ok) {
+          const seats = (await seatsRes.json()) as Seat[];
+          const total = Array.isArray(seats) ? seats.length : 0;
+          const occupied = Array.isArray(seats) ? seats.filter((s) => s.status === "occupied").length : 0;
+          if (!cancelled) setSeatCounts({ occupied, total });
+        }
+
+        if (classesRes.ok) {
+          const classes = (await classesRes.json()) as ClassRow[];
+          const active = Array.isArray(classes)
+            ? classes.filter((c) => (c.status || "active").toLowerCase() === "active").length
+            : 0;
+          if (!cancelled) setActiveClassCount(active);
+        }
+      } catch {
+        // ignore; show empty states
+      }
+    }
+
+    void loadOverview();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <>
@@ -55,9 +99,7 @@ export default function Dashboard() {
           {/* Business Overview Header */}
           <div className={styles.sectionHeader}>
             <h3>Overview</h3>
-            <span className={styles.timestamp}>
-              Last Update: 18 Feb 2026 | 02:00 PM 🔄
-            </span>
+            <span className={styles.timestamp}>Last Update: —</span>
           </div>
 
           {/* Stats Cards */}
@@ -65,23 +107,26 @@ export default function Dashboard() {
             <div className={`${styles.statWrapper} ${styles.bgBlueLight}`}>
               <span className={styles.statLabel}>📚 Library Seats</span>
               <div className={styles.statValue}>
-                18
-                <span style={{ fontSize: "1rem", color: "#64748b" }}>/24</span>
+                {seatCounts.occupied}
+                <span style={{ fontSize: "1rem", color: "#64748b" }}>/
+                  {seatCounts.total}
+                </span>
               </div>
             </div>
             <div className={`${styles.statWrapper} ${styles.bgBlueLight}`}>
               <span className={styles.statLabel}>🎓 Coaching Batches</span>
               <div className={styles.statValue}>
-                3 <span style={{ fontSize: "1rem", color: "#64748b" }}>Active</span>
+                {activeClassCount}{" "}
+                <span style={{ fontSize: "1rem", color: "#64748b" }}>Active</span>
               </div>
             </div>
             <div className={`${styles.statWrapper} ${styles.bgGreenLight}`}>
               <span className={styles.statLabel}>↓ Today&apos;s Collection</span>
-              <div className={styles.statValue}>₹ 4,500</div>
+              <div className={styles.statValue}>—</div>
             </div>
             <div className={`${styles.statWrapper} ${styles.bgRedLight}`}>
               <span className={styles.statLabel}>⚠️ Pending Dues</span>
-              <div className={styles.statValue}>₹ 12,000</div>
+              <div className={styles.statValue}>—</div>
             </div>
           </div>
 
@@ -104,38 +149,9 @@ export default function Dashboard() {
                 </thead>
                 <tbody>
                   <tr>
-                    <td>18 Feb 2026</td>
-                    <td>Rahul Kumar</td>
-                    <td>
-                      <span className={styles.badge}>Library Fee</span>
+                    <td colSpan={5} style={{ padding: "1.5rem", textAlign: "center", color: "#64748b" }}>
+                      No transactions yet.
                     </td>
-                    <td>₹ 800</td>
-                    <td style={{ color: "green" }}>Paid</td>
-                  </tr>
-                  <tr>
-                    <td>18 Feb 2026</td>
-                    <td>Sneha Gupta</td>
-                    <td>
-                      <span className={styles.badge}>Coaching Fee</span>
-                    </td>
-                    <td>₹ 2,500</td>
-                    <td style={{ color: "green" }}>Paid</td>
-                  </tr>
-                  <tr>
-                    <td>17 Feb 2026</td>
-                    <td>Amit Singh</td>
-                    <td>Book Sale</td>
-                    <td>₹ 450</td>
-                    <td style={{ color: "green" }}>Paid</td>
-                  </tr>
-                  <tr>
-                    <td>17 Feb 2026</td>
-                    <td>Vikram Malhotra</td>
-                    <td>
-                      <span className={styles.badge}>Library Fee</span>
-                    </td>
-                    <td>₹ 1,200</td>
-                    <td style={{ color: "orange" }}>Pending</td>
                   </tr>
                 </tbody>
               </table>
@@ -150,7 +166,7 @@ export default function Dashboard() {
         <AddStudentModal
           isOpen={isStudentModalOpen}
           onClose={() => setIsStudentModalOpen(false)}
-          availableClasses={MOCK_AVAILABLE_CLASSES}
+          availableClasses={[]}
         />
     </>
   );

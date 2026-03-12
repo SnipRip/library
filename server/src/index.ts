@@ -3,6 +3,8 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { getEnv } from "./env.js";
 import { registerAuthRoutes } from "./routes/auth.js";
+import { registerClassRoutes } from "./routes/classes.js";
+import { registerLibraryRoutes } from "./routes/library.js";
 import { registerStudentRoutes } from "./routes/students.js";
 
 const env = getEnv();
@@ -17,6 +19,8 @@ await app.register(cors, {
 app.get("/health", async () => ({ ok: true }));
 
 await registerAuthRoutes(app);
+await registerClassRoutes(app);
+await registerLibraryRoutes(app);
 await registerStudentRoutes(app);
 
 app.listen({ port: env.PORT, host: "0.0.0.0" });

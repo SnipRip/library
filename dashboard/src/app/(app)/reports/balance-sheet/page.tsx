@@ -35,23 +35,6 @@ const GROUPS: Group[] = [
   { id: "advances", side: "assets", title: "Advances", hint: "Deposits and advances paid" },
 ];
 
-const SEED_ENTRIES: Entry[] = [
-  {
-    id: "seed-1",
-    groupId: "current-assets",
-    date: "2026-03-06",
-    name: "Books & Stationery Stock",
-    amount: 18450,
-  },
-  {
-    id: "seed-2",
-    groupId: "result",
-    date: "2026-03-06",
-    name: "Net Income (today)",
-    amount: 18450,
-  },
-];
-
 function formatInr(amount: number) {
   return new Intl.NumberFormat("en-IN", {
     style: "currency",
@@ -71,7 +54,7 @@ function todayISO() {
 export default function BalanceSheetPage() {
   const [asOfDate, setAsOfDate] = useState(todayISO());
 
-  const [entries, setEntries] = useState<Entry[]>(SEED_ENTRIES);
+  const [entries, setEntries] = useState<Entry[]>([]);
 
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);

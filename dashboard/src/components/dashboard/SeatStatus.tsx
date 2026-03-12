@@ -1,18 +1,43 @@
+"use client";
+
+import { useEffect, useState } from 'react';
 import styles from './SeatStatus.module.css';
+import { API_BASE_URL } from '@/lib/api';
 
 interface Seat {
     id: string;
-    number: string;
+    seat_number: string;
     status: 'available' | 'occupied' | 'maintenance';
 }
 
-const MOCK_SEATS: Seat[] = Array.from({ length: 24 }, (_, i) => ({
-    id: `seat-${i}`,
-    number: `${i + 1}`,
-    status: i % 3 === 0 ? 'occupied' : i % 7 === 0 ? 'maintenance' : 'available'
-}));
-
 export default function SeatStatus() {
+    const [seats, setSeats] = useState<Seat[]>([]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        async function load() {
+            try {
+                const token = localStorage.getItem('token');
+                if (!token) return;
+
+                const res = await fetch(`${API_BASE_URL}/library/seats`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                if (!res.ok) return;
+                const body = await res.json();
+                if (!cancelled) setSeats(Array.isArray(body) ? body : []);
+            } catch {
+                // ignore
+            }
+        }
+
+        void load();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
     return (
         <div className={styles.container}>
             <div className={styles.header}>
@@ -24,15 +49,19 @@ export default function SeatStatus() {
             </div>
 
             <div className={styles.grid}>
-                {MOCK_SEATS.map((seat) => (
-                    <div
-                        key={seat.id}
-                        className={`${styles.seat} ${styles[seat.status]}`}
-                        title={`Seat ${seat.number}: ${seat.status}`}
-                    >
-                        {seat.number}
-                    </div>
-                ))}
+                {seats.length === 0 ? (
+                    <div className={styles.empty}>No seats configured yet.</div>
+                ) : (
+                    seats.map((seat) => (
+                        <div
+                            key={seat.id}
+                            className={`${styles.seat} ${styles[seat.status]}`}
+                            title={`Seat ${seat.seat_number}: ${seat.status}`}
+                        >
+                            {seat.seat_number}
+                        </div>
+                    ))
+                )}
             </div>
         </div>
     );

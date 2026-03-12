@@ -238,32 +238,75 @@ export function AddStudentModal({ isOpen, onClose, availableClasses = [], onCrea
 interface AddBatchModalProps {
     isOpen: boolean;
     onClose: () => void;
+    onCreated?: () => void;
 }
 
-export function AddBatchModal({ isOpen, onClose }: AddBatchModalProps) {
-    const handleSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
-        alert("Batch Added!");
+export function AddBatchModal({ isOpen, onClose, onCreated }: AddBatchModalProps) {
+    const [name, setName] = useState('');
+    const [saving, setSaving] = useState(false);
+
+    const handleClose = () => {
+        if (saving) return;
+        setName('');
         onClose();
     };
 
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        if (!token) {
+            alert('You are not logged in.');
+            return;
+        }
+
+        const trimmed = name.trim();
+        if (!trimmed) return;
+
+        setSaving(true);
+        try {
+            const res = await fetch(`${API_BASE_URL}/classes`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ name: trimmed }),
+            });
+
+            if (!res.ok) {
+                const msg = await res.text().catch(() => '');
+                alert(msg || 'Failed to create class');
+                return;
+            }
+
+            setName('');
+            onClose();
+            onCreated?.();
+        } catch {
+            alert('Failed to create class');
+        } finally {
+            setSaving(false);
+        }
+    };
+
     return (
-        <BaseModal isOpen={isOpen} onClose={onClose} title="Create New Batch" onSubmit={handleSubmit}>
+        <BaseModal
+            isOpen={isOpen}
+            onClose={handleClose}
+            title="Create New Class"
+            onSubmit={handleSubmit}
+            submitDisabled={saving || !name.trim()}
+        >
             <div className={styles.inputGroup}>
-                <label className={styles.label}>Batch Name</label>
-                <input type="text" className={styles.input} placeholder="e.g. Physics Class 11" required />
-            </div>
-            <div className={styles.inputGroup}>
-                <label className={styles.label}>Instructor</label>
-                <input type="text" className={styles.input} placeholder="e.g. Mr. Verma" required />
-            </div>
-            <div className={styles.inputGroup}>
-                <label className={styles.label}>Schedule</label>
-                <input type="text" className={styles.input} placeholder="e.g. MWF 4:00 PM" required />
-            </div>
-            <div className={styles.inputGroup}>
-                <label className={styles.label}>Monthly Fee (₹)</label>
-                <input type="number" className={styles.input} placeholder="e.g. 1000" required />
+                <label className={styles.label}>Class Name</label>
+                <input
+                    type="text"
+                    className={styles.input}
+                    placeholder="e.g. Class 6"
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                />
             </div>
         </BaseModal>
     );

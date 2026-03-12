@@ -6,7 +6,6 @@ import TopNav from '@/components/TopNav';
 import { AddStudentModal } from '@/components/modals/Modals';
 import { API_BASE_URL } from '@/lib/api';
 
-// Mock Data
 interface Student {
     id: string;
     full_name: string;
@@ -112,7 +111,7 @@ export default function StudentsPage() {
                                             {student.status || 'active'}
                                         </span>
                                     </td>
-                                    <td>{new Date(student.created_at).toLocaleDateString()}</td>
+                                    <td>—</td>
                                     <td>
                                         <button style={{ color: '#64748b', marginRight: '1rem' }}>Edit</button>
                                         <button style={{ color: '#3b82f6' }}>View</button>

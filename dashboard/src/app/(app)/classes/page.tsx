@@ -1,22 +1,50 @@
 "use client";
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import TopNav from '@/components/TopNav';
 import styles from './classes.module.css';
 import { AddBatchModal } from '@/components/modals/Modals';
+import { API_BASE_URL } from '@/lib/api';
 
-// Mock Data
-const CLASSES_LIST = [
-    { id: 6, name: "Class 6", teacher: "Mrs. Das", students: 32, section: "A" },
-    { id: 7, name: "Class 7", teacher: "Mr. Singh", students: 28, section: "A" },
-    { id: 8, name: "Class 8", teacher: "Ms. ALiya", students: 35, section: "B" },
-    { id: 9, name: "Class 9", teacher: "Mr. Rao", students: 40, section: "A" },
-    { id: 10, name: "Class 10", teacher: "Mrs. Kulkarni", students: 38, section: "A" },
-];
+type ClassRow = {
+    id: string;
+    name: string;
+    status: string;
+};
 
 export default function ClassesPage() {
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+    const [classes, setClasses] = useState<ClassRow[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    const load = async () => {
+        try {
+            const token = localStorage.getItem('token');
+            if (!token) {
+                setClasses([]);
+                return;
+            }
+
+            const res = await fetch(`${API_BASE_URL}/classes`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok) {
+                setClasses([]);
+                return;
+            }
+            const body = await res.json();
+            setClasses(Array.isArray(body) ? body : []);
+        } catch {
+            setClasses([]);
+        }
+    };
+
+    useEffect(() => {
+        setLoading(true);
+        void load().finally(() => setLoading(false));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     return (
         <>
@@ -35,28 +63,30 @@ export default function ClassesPage() {
                 <AddBatchModal
                     isOpen={isAddModalOpen}
                     onClose={() => setIsAddModalOpen(false)}
+                    onCreated={() => void load()}
                 />
 
                 <div className={styles.grid}>
-                    {CLASSES_LIST.map((cls) => (
-                        <Link href={`/classes/${cls.id}`} key={cls.id} style={{ textDecoration: 'none' }}>
-                            <div className={styles.card} suppressHydrationWarning>
-                                <div className={styles.cardHeader} suppressHydrationWarning>
-                                    <h3 style={{ fontSize: '1.25rem' }}>{cls.name}</h3>
-                                    <div className={styles.instructor}>Class Teacher: {cls.teacher}</div>
-                                </div>
+                    {loading ? (
+                        <div style={{ padding: '1rem' }}>Loading…</div>
+                    ) : classes.length === 0 ? (
+                        <div style={{ padding: '1rem' }}>No classes yet.</div>
+                    ) : (
+                        classes.map((cls) => (
+                            <Link href={`/classes/${cls.id}`} key={cls.id} style={{ textDecoration: 'none' }}>
+                                <div className={styles.card} suppressHydrationWarning>
+                                    <div className={styles.cardHeader} suppressHydrationWarning>
+                                        <h3 style={{ fontSize: '1.25rem' }}>{cls.name}</h3>
+                                        <div className={styles.instructor}>Status: {cls.status}</div>
+                                    </div>
 
-                                <div className={styles.schedule} suppressHydrationWarning>
-                                    <span style={{ color: '#64748b' }}>Section {cls.section} • General Shift</span>
+                                    <div className={styles.footer} suppressHydrationWarning>
+                                        <span className={styles.fee} style={{ fontSize: '0.875rem', fontWeight: 500 }}>View Details &rarr;</span>
+                                    </div>
                                 </div>
-
-                                <div className={styles.footer} suppressHydrationWarning>
-                                    <span className={styles.studentsCount}>👥 {cls.students} Students</span>
-                                    <span className={styles.fee} style={{ fontSize: '0.875rem', fontWeight: 500, color: '#64748b' }}>View Details &rarr;</span>
-                                </div>
-                            </div>
-                        </Link>
-                    ))}
+                            </Link>
+                        ))
+                    )}
                 </div>
 
             </div>
