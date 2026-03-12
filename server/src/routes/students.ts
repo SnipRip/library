@@ -58,31 +58,64 @@ export async function registerStudentRoutes(app: FastifyInstance) {
       status,
     } = parsed.data;
 
-    const result = await pool.query(
-      `insert into students (
+    const client = await pool.connect();
+    try {
+      await client.query("begin");
+
+      const accountRes = await client.query(
+        `insert into account_master (entity_type, name, phone, status)
+         values ('student', $1, $2, $3)
+         returning id`,
+        [full_name, phone, status],
+      );
+      const account_master_id = accountRes.rows[0]?.id as string | undefined;
+      if (!account_master_id) throw new Error("Failed to create account master");
+
+      const studentRes = await client.query(
+        `insert into students (
+            full_name,
+            phone,
+            account_master_id,
+            alternate_phone,
+            aadhar,
+            guardian_name,
+            address,
+            admission_type,
+            status
+          )
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         returning id, full_name, phone, admission_type, status, created_at`,
+        [
           full_name,
           phone,
-          alternate_phone,
-          aadhar,
-          guardian_name,
-          address,
-          admission_type,
-          status
-        )
-       values ($1, $2, $3, $4, $5, $6, $7, $8)
-       returning id, full_name, phone, admission_type, status, created_at`,
-      [
-        full_name,
-        phone,
-        alternate_phone ?? null,
-        aadhar ?? null,
-        guardian_name ?? null,
-        address ?? null,
-        admission_type ?? null,
-        status,
-      ],
-    );
+          account_master_id,
+          alternate_phone ?? null,
+          aadhar ?? null,
+          guardian_name ?? null,
+          address ?? null,
+          admission_type ?? null,
+          status,
+        ],
+      );
 
-    return reply.code(201).send(result.rows[0]);
+      const studentId = studentRes.rows[0]?.id as string | undefined;
+      if (studentId) {
+        await client.query(
+          `update account_master
+           set entity_id = $2,
+               updated_at = now()
+           where id = $1`,
+          [account_master_id, studentId],
+        );
+      }
+
+      await client.query("commit");
+      return reply.code(201).send(studentRes.rows[0]);
+    } catch (err) {
+      await client.query("rollback");
+      throw err;
+    } finally {
+      client.release();
+    }
   });
 }

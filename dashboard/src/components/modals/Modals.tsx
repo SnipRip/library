@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import styles from './Modal.module.css';
 import { API_BASE_URL } from '@/lib/api';
 
@@ -697,8 +697,37 @@ interface AddSeatModalProps {
 
 export function AddSeatModal({ isOpen, onClose, onCreated }: AddSeatModalProps) {
     const [seatNumber, setSeatNumber] = useState('');
-    const [hall, setHall] = useState('');
+    const [hallId, setHallId] = useState<string>('');
+    const [halls, setHalls] = useState<Array<{ id: string; name: string }>>([]);
+    const [loadingHalls, setLoadingHalls] = useState(false);
     const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        if (!token) return;
+
+        const controller = new AbortController();
+        setLoadingHalls(true);
+        fetch(`${API_BASE_URL}/library/halls`, {
+            headers: {
+                Authorization: `Bearer ${token}`,
+            },
+            signal: controller.signal,
+        })
+            .then(async (res) => {
+                const body = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(body?.message || 'Failed to load halls');
+                setHalls(Array.isArray(body) ? body : []);
+            })
+            .catch(() => {
+                // Keep UX minimal: fail silently and allow seat creation without hall.
+                setHalls([]);
+            })
+            .finally(() => setLoadingHalls(false));
+
+        return () => controller.abort();
+    }, [isOpen]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -715,7 +744,7 @@ export function AddSeatModal({ isOpen, onClose, onCreated }: AddSeatModalProps) 
                     'Content-Type': 'application/json',
                     Authorization: `Bearer ${token}`,
                 },
-                body: JSON.stringify({ seat_number: seatNumber, hall: hall.trim() || null }),
+                body: JSON.stringify({ seat_number: seatNumber, hall_id: hallId || null }),
             });
             const body = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(body?.message || 'Failed to add seat');
@@ -723,6 +752,7 @@ export function AddSeatModal({ isOpen, onClose, onCreated }: AddSeatModalProps) 
             onCreated?.();
             onClose();
             setSeatNumber('');
+            setHallId('');
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);
             alert(message);
@@ -753,13 +783,19 @@ export function AddSeatModal({ isOpen, onClose, onCreated }: AddSeatModalProps) 
             </div>
             <div className={styles.inputGroup}>
                 <label className={styles.label}>Floor / Hall</label>
-                <input
-                    type="text"
+                <select
                     className={styles.input}
-                    placeholder="Enter hall name (optional)"
-                    value={hall}
-                    onChange={(e) => setHall(e.target.value)}
-                />
+                    value={hallId}
+                    onChange={(e) => setHallId(e.target.value)}
+                    disabled={loadingHalls || halls.length === 0}
+                >
+                    <option value="">{loadingHalls ? 'Loading halls...' : halls.length === 0 ? 'No halls yet' : 'No hall'}</option>
+                    {halls.map((h) => (
+                        <option key={h.id} value={h.id}>
+                            {h.name}
+                        </option>
+                    ))}
+                </select>
             </div>
         </BaseModal>
     );

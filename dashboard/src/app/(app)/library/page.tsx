@@ -9,6 +9,8 @@ import { API_BASE_URL } from '@/lib/api';
 interface Seat {
     id: string;
     seat_number: string;
+    hall_id?: string | null;
+    hall_name?: string | null;
     hall?: string | null;
     status: 'available' | 'occupied' | 'maintenance';
     occupant_name?: string | null;
@@ -65,7 +67,7 @@ export default function LibraryPage() {
     }, []);
 
     const hallsFromSeats = Array.from(
-        new Set(seats.map((s) => (s.hall || '').trim()).filter(Boolean))
+        new Set(seats.map((s) => (s.hall_name || s.hall || '').trim()).filter(Boolean))
     );
     const hallLabel = hallsFromSeats.length === 1 ? hallsFromSeats[0] : hallsFromSeats.length > 1 ? 'All Halls' : '';
 

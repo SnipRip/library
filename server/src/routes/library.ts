@@ -5,6 +5,8 @@ import { requireAuth } from "../middleware/auth.js";
 
 const CreateSeatSchema = z.object({
   seat_number: z.string().min(1),
+  hall_id: z.string().uuid().optional().nullable(),
+  // backward compatibility
   hall: z.string().optional().nullable(),
 });
 
@@ -111,11 +113,14 @@ export async function registerLibraryRoutes(app: FastifyInstance) {
       `select
         s.id,
         s.seat_number,
+        s.hall_id,
+        h.name as hall_name,
         s.hall,
         s.status,
         s.occupied_until,
         st.full_name as occupant_name
       from library_seats s
+      left join library_halls h on h.id = s.hall_id
       left join students st on st.id = s.occupant_student_id
       order by s.seat_number asc`,
     );
@@ -133,13 +138,35 @@ export async function registerLibraryRoutes(app: FastifyInstance) {
     }
 
     const pool = getPool();
-    const { seat_number, hall } = parsed.data;
+    const { seat_number, hall_id, hall } = parsed.data;
+
+    let resolvedHallId: string | null = hall_id ?? null;
+    const hallName = (hall ?? "").trim();
+
+    if (!resolvedHallId && hallName) {
+      // Resolve/create hall by name (keeps older clients working)
+      await pool.query(
+        `insert into library_halls (name)
+         values ($1)
+         on conflict (name) do nothing`,
+        [hallName],
+      );
+
+      const hallRes = await pool.query(
+        `select id
+         from library_halls
+         where name = $1
+         limit 1`,
+        [hallName],
+      );
+      resolvedHallId = (hallRes.rows[0]?.id as string | undefined) ?? null;
+    }
 
     const result = await pool.query(
-      `insert into library_seats (seat_number, hall)
-       values ($1, $2)
-       returning id, seat_number, hall, status, occupied_until`,
-      [seat_number, hall ?? null],
+      `insert into library_seats (seat_number, hall_id, hall)
+       values ($1, $2, $3)
+       returning id, seat_number, hall_id, hall, status, occupied_until`,
+      [seat_number, resolvedHallId, hallName || null],
     );
 
     return reply.code(201).send(result.rows[0]);

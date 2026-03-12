@@ -52,6 +52,7 @@ create table if not exists students (
   id uuid primary key default gen_random_uuid(),
   full_name text not null,
   phone text not null,
+  account_master_id uuid null,
   alternate_phone text null,
   aadhar text null,
   guardian_name text null,
@@ -63,6 +64,7 @@ create table if not exists students (
 );
 
 -- If the table existed from a previous bootstrap, ensure new columns exist.
+alter table students add column if not exists account_master_id uuid;
 alter table students add column if not exists alternate_phone text;
 alter table students add column if not exists aadhar text;
 alter table students add column if not exists guardian_name text;
@@ -70,12 +72,43 @@ alter table students add column if not exists address text;
 
 create index if not exists idx_students_full_name on students (full_name);
 create index if not exists idx_students_phone on students (phone);
+create index if not exists idx_students_account_master_id on students (account_master_id);
+
+-- Account master (minimal party/sub-ledger master)
+create table if not exists account_master (
+  id uuid primary key default gen_random_uuid(),
+  entity_type text not null,
+  entity_id uuid null,
+  name text not null,
+  phone text null,
+  email text null,
+  status text not null default 'active',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_account_master_entity on account_master (entity_type, entity_id);
+create unique index if not exists ux_account_master_entity on account_master (entity_type, entity_id)
+  where entity_id is not null;
+
+-- FK: students.account_master_id -> account_master.id (safe for re-runs)
+do $$
+begin
+  alter table students
+    add constraint fk_students_account_master
+    foreign key (account_master_id)
+    references account_master(id)
+    on delete set null;
+exception
+  when duplicate_object then null;
+end $$;
 
 -- Library seats (minimal)
 create table if not exists library_seats (
   id uuid primary key default gen_random_uuid(),
   seat_number text not null unique,
   hall text null,
+  hall_id uuid null,
   status text not null default 'available',
   occupant_student_id uuid null references students(id) on delete set null,
   occupied_until timestamptz null,
@@ -87,6 +120,7 @@ create index if not exists idx_library_seats_status on library_seats (status);
 
 -- If the table existed from a previous bootstrap, ensure new columns exist.
 alter table library_seats add column if not exists hall text;
+alter table library_seats add column if not exists hall_id uuid;
 alter table library_seats add column if not exists occupant_student_id uuid;
 alter table library_seats add column if not exists occupied_until timestamptz;
 
@@ -112,3 +146,33 @@ create table if not exists library_halls (
 );
 
 create index if not exists idx_library_halls_name on library_halls (name);
+
+create index if not exists idx_library_seats_hall_id on library_seats (hall_id);
+
+-- FK: library_seats.hall_id -> library_halls.id (safe for re-runs)
+do $$
+begin
+  alter table library_seats
+    add constraint fk_library_seats_hall_id
+    foreign key (hall_id)
+    references library_halls(id)
+    on delete set null;
+exception
+  when duplicate_object then null;
+end $$;
+
+-- Backfill from legacy text column `hall` into `library_halls` + `library_seats.hall_id`
+insert into library_halls (name)
+select distinct trim(hall)
+from library_seats
+where hall is not null and trim(hall) <> ''
+on conflict (name) do nothing;
+
+update library_seats s
+set hall_id = h.id,
+    updated_at = now()
+from library_halls h
+where s.hall_id is null
+  and s.hall is not null
+  and trim(s.hall) <> ''
+  and trim(s.hall) = h.name;
