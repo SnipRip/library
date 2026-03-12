@@ -13,37 +13,34 @@ type ClassRow = {
     status: string;
 };
 
+async function loadClasses(setClasses: React.Dispatch<React.SetStateAction<ClassRow[] | null>>) {
+    try {
+        const token = localStorage.getItem('token');
+        if (!token) {
+            setClasses([]);
+            return;
+        }
+
+        const res = await fetch(`${API_BASE_URL}/classes`, {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) {
+            setClasses([]);
+            return;
+        }
+        const body = await res.json();
+        setClasses(Array.isArray(body) ? body : []);
+    } catch {
+        setClasses([]);
+    }
+}
+
 export default function ClassesPage() {
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-    const [classes, setClasses] = useState<ClassRow[]>([]);
-    const [loading, setLoading] = useState(true);
-
-    const load = async () => {
-        try {
-            const token = localStorage.getItem('token');
-            if (!token) {
-                setClasses([]);
-                return;
-            }
-
-            const res = await fetch(`${API_BASE_URL}/classes`, {
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            if (!res.ok) {
-                setClasses([]);
-                return;
-            }
-            const body = await res.json();
-            setClasses(Array.isArray(body) ? body : []);
-        } catch {
-            setClasses([]);
-        }
-    };
+    const [classes, setClasses] = useState<ClassRow[] | null>(null);
 
     useEffect(() => {
-        setLoading(true);
-        void load().finally(() => setLoading(false));
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+        void loadClasses(setClasses);
     }, []);
 
     return (
@@ -63,11 +60,14 @@ export default function ClassesPage() {
                 <AddBatchModal
                     isOpen={isAddModalOpen}
                     onClose={() => setIsAddModalOpen(false)}
-                    onCreated={() => void load()}
+                    onCreated={() => {
+                        setClasses(null);
+                        void loadClasses(setClasses);
+                    }}
                 />
 
                 <div className={styles.grid}>
-                    {loading ? (
+                    {classes === null ? (
                         <div style={{ padding: '1rem' }}>Loading…</div>
                     ) : classes.length === 0 ? (
                         <div style={{ padding: '1rem' }}>No classes yet.</div>

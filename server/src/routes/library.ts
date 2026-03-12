@@ -12,7 +12,96 @@ const UpdateSeatSchema = z.object({
   status: z.enum(["available", "occupied", "maintenance"]),
 });
 
+const TimeSchema = z.string().regex(/^\d{2}:\d{2}$/);
+
+const CreateShiftSchema = z.object({
+  name: z.string().min(1),
+  start_time: TimeSchema,
+  end_time: TimeSchema,
+  monthly_fee: z.number().int().nonnegative().nullable().optional(),
+});
+
+const CreateHallSchema = z.object({
+  name: z.string().min(1),
+});
+
 export async function registerLibraryRoutes(app: FastifyInstance) {
+  app.get("/library/halls", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const pool = getPool();
+    const result = await pool.query(
+      `select id, name, created_at
+       from library_halls
+       order by name asc`,
+    );
+
+    return reply.send(result.rows);
+  });
+
+  app.post("/library/halls", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const parsed = CreateHallSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ message: "Invalid body", errors: parsed.error.issues });
+    }
+
+    const pool = getPool();
+    const { name } = parsed.data;
+
+    const result = await pool.query(
+      `insert into library_halls (name)
+       values ($1)
+       returning id, name, created_at`,
+      [name],
+    );
+
+    return reply.code(201).send(result.rows[0]);
+  });
+
+  app.get("/library/shifts", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const pool = getPool();
+    const result = await pool.query(
+      `select
+        id,
+        name,
+        start_time::text as start_time,
+        end_time::text as end_time,
+        monthly_fee,
+        created_at
+      from library_shifts
+      order by start_time asc, name asc`,
+    );
+    return reply.send(result.rows);
+  });
+
+  app.post("/library/shifts", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const parsed = CreateShiftSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ message: "Invalid body", errors: parsed.error.issues });
+    }
+
+    const pool = getPool();
+    const { name, start_time, end_time, monthly_fee } = parsed.data;
+    const result = await pool.query(
+      `insert into library_shifts (name, start_time, end_time, monthly_fee)
+       values ($1, $2, $3, $4)
+       returning id, name, start_time::text as start_time, end_time::text as end_time, monthly_fee, created_at`,
+      [name, start_time, end_time, monthly_fee ?? null],
+    );
+
+    return reply.code(201).send(result.rows[0]);
+  });
+
   app.get("/library/seats", async (req, reply) => {
     const auth = await requireAuth(req);
     if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
@@ -22,6 +111,7 @@ export async function registerLibraryRoutes(app: FastifyInstance) {
       `select
         s.id,
         s.seat_number,
+        s.hall,
         s.status,
         s.occupied_until,
         st.full_name as occupant_name
@@ -48,7 +138,7 @@ export async function registerLibraryRoutes(app: FastifyInstance) {
     const result = await pool.query(
       `insert into library_seats (seat_number, hall)
        values ($1, $2)
-       returning id, seat_number, status, occupied_until`,
+       returning id, seat_number, hall, status, occupied_until`,
       [seat_number, hall ?? null],
     );
 

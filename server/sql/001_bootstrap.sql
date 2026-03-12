@@ -48,25 +48,6 @@ create table if not exists classes (
 
 create index if not exists idx_classes_status on classes (status);
 
--- Library seats (minimal)
-create table if not exists library_seats (
-  id uuid primary key default gen_random_uuid(),
-  seat_number text not null unique,
-  hall text null,
-  status text not null default 'available',
-  occupant_student_id uuid null references students(id) on delete set null,
-  occupied_until timestamptz null,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-
-create index if not exists idx_library_seats_status on library_seats (status);
-
--- If the table existed from a previous bootstrap, ensure new columns exist.
-alter table library_seats add column if not exists hall text;
-alter table library_seats add column if not exists occupant_student_id uuid;
-alter table library_seats add column if not exists occupied_until timestamptz;
-
 create table if not exists students (
   id uuid primary key default gen_random_uuid(),
   full_name text not null,
@@ -89,3 +70,45 @@ alter table students add column if not exists address text;
 
 create index if not exists idx_students_full_name on students (full_name);
 create index if not exists idx_students_phone on students (phone);
+
+-- Library seats (minimal)
+create table if not exists library_seats (
+  id uuid primary key default gen_random_uuid(),
+  seat_number text not null unique,
+  hall text null,
+  status text not null default 'available',
+  occupant_student_id uuid null references students(id) on delete set null,
+  occupied_until timestamptz null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_library_seats_status on library_seats (status);
+
+-- If the table existed from a previous bootstrap, ensure new columns exist.
+alter table library_seats add column if not exists hall text;
+alter table library_seats add column if not exists occupant_student_id uuid;
+alter table library_seats add column if not exists occupied_until timestamptz;
+
+-- Library shifts (minimal)
+create table if not exists library_shifts (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  start_time time not null,
+  end_time time not null,
+  monthly_fee integer null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_library_shifts_start_time on library_shifts (start_time);
+
+-- Library halls (minimal)
+create table if not exists library_halls (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_library_halls_name on library_halls (name);

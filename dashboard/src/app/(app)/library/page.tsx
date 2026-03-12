@@ -9,9 +9,17 @@ import { API_BASE_URL } from '@/lib/api';
 interface Seat {
     id: string;
     seat_number: string;
+    hall?: string | null;
     status: 'available' | 'occupied' | 'maintenance';
     occupant_name?: string | null;
     occupied_until?: string | null;
+}
+
+interface Shift {
+    id: string;
+    name: string;
+    start_time: string;
+    end_time: string;
 }
 
 async function loadSeats(setSeats: React.Dispatch<React.SetStateAction<Seat[]>>) {
@@ -28,8 +36,23 @@ async function loadSeats(setSeats: React.Dispatch<React.SetStateAction<Seat[]>>)
     }
 }
 
+async function loadShifts(setShifts: React.Dispatch<React.SetStateAction<Shift[]>>) {
+    try {
+        const token = localStorage.getItem('token');
+        const res = await fetch(`${API_BASE_URL}/library/shifts`, {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const body = await res.json();
+        setShifts(Array.isArray(body) ? body : []);
+    } catch (err) {
+        console.error(err);
+    }
+}
+
 export default function LibraryPage() {
-    const [activeShift, setActiveShift] = useState('Full Day');
+    const [activeShiftId, setActiveShiftId] = useState<string | null>(null);
+    const [shifts, setShifts] = useState<Shift[]>([]);
     const [selectedSeat, setSelectedSeat] = useState<Seat | null>(null);
     const [seats, setSeats] = useState<Seat[]>([]);
     const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
@@ -38,7 +61,13 @@ export default function LibraryPage() {
 
     useEffect(() => {
         void loadSeats(setSeats);
+        void loadShifts(setShifts);
     }, []);
+
+    const hallsFromSeats = Array.from(
+        new Set(seats.map((s) => (s.hall || '').trim()).filter(Boolean))
+    );
+    const hallLabel = hallsFromSeats.length === 1 ? hallsFromSeats[0] : hallsFromSeats.length > 1 ? 'All Halls' : '';
 
     async function updateSeatStatus(seatId: string, status: Seat['status']) {
         try {
@@ -76,19 +105,19 @@ export default function LibraryPage() {
                     <h1 className={styles.title}>Seat Map</h1>
 
                     <div className={styles.filters}>
-                        {['Morning', 'Evening', 'Full Day'].map((shift) => (
+                        {shifts.map((shift) => (
                             <button
-                                key={shift}
-                                className={`${styles.filterBtn} ${activeShift === shift ? styles.activeFilter : ''}`}
-                                onClick={() => setActiveShift(shift)}
+                                key={shift.id}
+                                className={`${styles.filterBtn} ${activeShiftId === shift.id ? styles.activeFilter : ''}`}
+                                onClick={() => setActiveShiftId(shift.id)}
+                                title={`${shift.start_time} - ${shift.end_time}`}
                             >
-                                {shift}
+                                {shift.name}
                             </button>
                         ))}
                         <button
                             onClick={() => setIsShiftModalOpen(true)}
                             style={{
-                                marginLeft: '1rem',
                                 padding: '0.5rem 1rem',
                                 background: '#3b82f6',
                                 color: 'white',
@@ -99,7 +128,7 @@ export default function LibraryPage() {
                                 cursor: 'pointer'
                             }}
                         >
-                            + Manage Shifts
+                            + Add Shift
                         </button>
                     </div>
                 </div>
@@ -107,6 +136,7 @@ export default function LibraryPage() {
                 <CreateShiftModal
                     isOpen={isShiftModalOpen}
                     onClose={() => setIsShiftModalOpen(false)}
+                    onCreated={() => loadShifts(setShifts)}
                 />
 
                 <AddSeatModal
@@ -118,6 +148,9 @@ export default function LibraryPage() {
                 <AddHallModal
                     isOpen={isHallModalOpen}
                     onClose={() => setIsHallModalOpen(false)}
+                    onCreated={() => {
+                        // no-op for now; halls are not rendered yet
+                    }}
                 />
 
                 <div className={styles.mainLayout}>
@@ -126,7 +159,9 @@ export default function LibraryPage() {
                     <div className={styles.seatMap}>
                         <div className={styles.mapHeader}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                                <h3 style={{ fontSize: '1.1rem', fontWeight: 600 }}>Floor 1 (AC Hall)</h3>
+                                {hallLabel ? (
+                                    <h3 style={{ fontSize: '1.1rem', fontWeight: 600 }}>{hallLabel}</h3>
+                                ) : null}
                                 <button
                                     onClick={() => setIsSeatModalOpen(true)}
                                     style={{

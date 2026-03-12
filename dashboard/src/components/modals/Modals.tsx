@@ -573,46 +573,71 @@ export function AddUserModal({ isOpen, onClose, onCreate }: AddUserModalProps) {
 interface CreateShiftModalProps {
     isOpen: boolean;
     onClose: () => void;
+    onCreated?: () => void;
 }
 
-export function CreateShiftModal({ isOpen, onClose }: CreateShiftModalProps) {
-    const [workingHours, setWorkingHours] = useState({ start: "08:00", end: "22:00" });
+export function CreateShiftModal({ isOpen, onClose, onCreated }: CreateShiftModalProps) {
     const [shiftData, setShiftData] = useState({ name: "", start: "", end: "" });
+    const [monthlyFee, setMonthlyFee] = useState<string>('');
+    const [saving, setSaving] = useState(false);
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        // Validation logic relative to workingHours could go here
-        alert(`Shift Created: ${shiftData.name} (${shiftData.start} - ${shiftData.end})`);
-        onClose();
+
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        if (!token) {
+            alert('You are not logged in.');
+            return;
+        }
+
+        const name = shiftData.name.trim();
+        if (!name || !shiftData.start || !shiftData.end) return;
+
+        const parsedFee = monthlyFee.trim() ? Number(monthlyFee) : null;
+        if (monthlyFee.trim() && (!Number.isFinite(parsedFee) || parsedFee! < 0)) {
+            alert('Please enter a valid monthly fee');
+            return;
+        }
+
+        setSaving(true);
+        try {
+            const res = await fetch(`${API_BASE_URL}/library/shifts`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({
+                    name,
+                    start_time: shiftData.start,
+                    end_time: shiftData.end,
+                    monthly_fee: parsedFee,
+                }),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(body?.message || 'Failed to create shift');
+
+            setShiftData({ name: '', start: '', end: '' });
+            setMonthlyFee('');
+            onClose();
+            onCreated?.();
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            alert(message);
+        } finally {
+            setSaving(false);
+        }
     };
 
     return (
-        <BaseModal isOpen={isOpen} onClose={onClose} title="Configure Library Shift" onSubmit={handleSubmit}>
-
-            <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '0.5rem', marginBottom: '1rem', border: '1px solid #e2e8f0' }}>
-                <h4 style={{ fontSize: '0.9rem', fontWeight: 600, margin: '0 0 0.5rem 0', color: '#475569' }}>Library Working Hours</h4>
-                <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                    <input
-                        type="time"
-                        value={workingHours.start}
-                        onChange={(e) => setWorkingHours({ ...workingHours, start: e.target.value })}
-                        className={styles.input}
-                        style={{ width: 'auto' }}
-                    />
-                    <span style={{ color: '#64748b' }}>to</span>
-                    <input
-                        type="time"
-                        value={workingHours.end}
-                        onChange={(e) => setWorkingHours({ ...workingHours, end: e.target.value })}
-                        className={styles.input}
-                        style={{ width: 'auto' }}
-                    />
-                </div>
-                <p style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.5rem' }}>
-                    Shifts must fall within these hours.
-                </p>
-            </div>
-
+        <BaseModal
+            isOpen={isOpen}
+            onClose={onClose}
+            title="Configure Library Shift"
+            onSubmit={handleSubmit}
+            submitDisabled={saving}
+            submitLabel={saving ? 'Saving...' : 'Save'}
+        >
             <div className={styles.inputGroup}>
                 <label className={styles.label}>Shift Name</label>
                 <input
@@ -650,7 +675,14 @@ export function CreateShiftModal({ isOpen, onClose }: CreateShiftModalProps) {
 
             <div className={styles.inputGroup}>
                 <label className={styles.label}>Monthly Fee for this Shift (₹)</label>
-                <input type="number" className={styles.input} placeholder="e.g. 500" />
+                <input
+                    type="number"
+                    className={styles.input}
+                    placeholder="e.g. 500"
+                    value={monthlyFee}
+                    onChange={(e) => setMonthlyFee(e.target.value)}
+                    min={0}
+                />
             </div>
 
         </BaseModal>
@@ -665,7 +697,7 @@ interface AddSeatModalProps {
 
 export function AddSeatModal({ isOpen, onClose, onCreated }: AddSeatModalProps) {
     const [seatNumber, setSeatNumber] = useState('');
-    const [hall, setHall] = useState('Floor 1 (AC Hall)');
+    const [hall, setHall] = useState('');
     const [saving, setSaving] = useState(false);
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -683,7 +715,7 @@ export function AddSeatModal({ isOpen, onClose, onCreated }: AddSeatModalProps) 
                     'Content-Type': 'application/json',
                     Authorization: `Bearer ${token}`,
                 },
-                body: JSON.stringify({ seat_number: seatNumber, hall }),
+                body: JSON.stringify({ seat_number: seatNumber, hall: hall.trim() || null }),
             });
             const body = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(body?.message || 'Failed to add seat');
@@ -721,10 +753,13 @@ export function AddSeatModal({ isOpen, onClose, onCreated }: AddSeatModalProps) 
             </div>
             <div className={styles.inputGroup}>
                 <label className={styles.label}>Floor / Hall</label>
-                <select className={styles.select} value={hall} onChange={(e) => setHall(e.target.value)}>
-                    <option>Floor 1 (AC Hall)</option>
-                    <option>Floor 2 (Non-AC)</option>
-                </select>
+                <input
+                    type="text"
+                    className={styles.input}
+                    placeholder="Enter hall name (optional)"
+                    value={hall}
+                    onChange={(e) => setHall(e.target.value)}
+                />
             </div>
         </BaseModal>
     );
@@ -733,32 +768,73 @@ export function AddSeatModal({ isOpen, onClose, onCreated }: AddSeatModalProps) 
 interface AddHallModalProps {
     isOpen: boolean;
     onClose: () => void;
+    onCreated?: () => void;
 }
 
-export function AddHallModal({ isOpen, onClose }: AddHallModalProps) {
-    const handleSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
-        alert("Hall Added!");
+export function AddHallModal({ isOpen, onClose, onCreated }: AddHallModalProps) {
+    const [name, setName] = useState('');
+    const [saving, setSaving] = useState(false);
+
+    const handleClose = () => {
+        if (saving) return;
+        setName('');
         onClose();
     };
 
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        if (!token) {
+            alert('You are not logged in.');
+            return;
+        }
+
+        const trimmed = name.trim();
+        if (!trimmed) return;
+
+        setSaving(true);
+        try {
+            const res = await fetch(`${API_BASE_URL}/library/halls`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ name: trimmed }),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(body?.message || 'Failed to create hall');
+
+            setName('');
+            onClose();
+            onCreated?.();
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            alert(message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
     return (
-        <BaseModal isOpen={isOpen} onClose={onClose} title="Add New Hall / Floor" onSubmit={handleSubmit}>
+        <BaseModal
+            isOpen={isOpen}
+            onClose={handleClose}
+            title="Add New Hall"
+            onSubmit={handleSubmit}
+            submitDisabled={saving || !name.trim()}
+            submitLabel={saving ? 'Saving...' : 'Save'}
+        >
             <div className={styles.inputGroup}>
                 <label className={styles.label}>Hall Name</label>
-                <input type="text" className={styles.input} placeholder="e.g. Reading Room 2" required />
-            </div>
-            <div className={styles.inputGroup}>
-                <label className={styles.label}>Floor Number</label>
-                <input type="number" className={styles.input} placeholder="e.g. 2" required />
-            </div>
-            <div className={styles.inputGroup}>
-                <label className={styles.label}>Facilities</label>
-                <select className={styles.select}>
-                    <option>AC</option>
-                    <option>Non-AC</option>
-                    <option>Both</option>
-                </select>
+                <input
+                    type="text"
+                    className={styles.input}
+                    placeholder="e.g. Reading Room"
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                />
             </div>
         </BaseModal>
     );

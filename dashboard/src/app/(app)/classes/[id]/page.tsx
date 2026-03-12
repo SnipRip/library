@@ -14,59 +14,78 @@ type ClassRow = {
     updated_at?: string;
 };
 
+async function loadClassById(
+    classId: string,
+    signal: AbortSignal,
+    setClassRow: React.Dispatch<React.SetStateAction<ClassRow | null | undefined>>,
+) {
+    try {
+        const token = localStorage.getItem('token');
+        if (!token) {
+            setClassRow(null);
+            return;
+        }
+
+        const res = await fetch(`${API_BASE_URL}/classes/${classId}`, {
+            headers: { Authorization: `Bearer ${token}` },
+            signal,
+        });
+
+        if (res.status === 404) {
+            setClassRow(null);
+            return;
+        }
+
+        if (!res.ok) {
+            setClassRow(null);
+            return;
+        }
+
+        const body = await res.json();
+        setClassRow(body);
+    } catch (err: unknown) {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        setClassRow(null);
+    }
+}
+
 export default function ClassDetailsPage() {
     const params = useParams<{ id: string }>();
     const router = useRouter();
     const [activeTab, setActiveTab] = useState('overview');
-    const [classRow, setClassRow] = useState<ClassRow | null>(null);
-    const [loading, setLoading] = useState(true);
+    const [classRow, setClassRow] = useState<ClassRow | null | undefined>(undefined);
 
     const classId = typeof params?.id === 'string' ? params.id : undefined;
 
+    const effectiveRow =
+        classRow && classId && classRow.id === classId
+            ? classRow
+            : classRow === null
+                ? null
+                : undefined;
+
     useEffect(() => {
-        let cancelled = false;
-
-        async function load() {
-            try {
-                const token = localStorage.getItem('token');
-                if (!token) return;
-
-                if (!classId) return;
-
-                const res = await fetch(`${API_BASE_URL}/classes/${classId}`, {
-                    headers: { Authorization: `Bearer ${token}` },
-                });
-                if (!res.ok) return;
-                const body = await res.json();
-                if (!cancelled) setClassRow(body);
-            } catch {
-                // ignore
-            }
-        }
-
-        setLoading(true);
-        void load().finally(() => {
-            if (!cancelled) setLoading(false);
-        });
-
-        return () => {
-            cancelled = true;
-        };
+        if (!classId) return;
+        const controller = new AbortController();
+        void loadClassById(classId, controller.signal, setClassRow);
+        return () => controller.abort();
     }, [classId]);
 
     return (
         <>
-            <TopNav title={classRow?.name || 'Class'} />
+            <TopNav title={effectiveRow && effectiveRow !== null ? effectiveRow.name : 'Class'} />
 
             <div className={styles.container}>
                 {/* Header */}
                 <div className={styles.header}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                         <div>
-                            <h1 className={styles.title}>{classRow?.name || (loading ? 'Loading…' : 'Class not found')}</h1>
-                            {classRow && (
+                            <h1 className={styles.title}>
+                                {effectiveRow === undefined ? 'Loading…' : effectiveRow === null ? 'Class not found' : effectiveRow.name}
+                            </h1>
+                            {effectiveRow && (
                                 <div className={styles.subtitle}>
-                                    <span>Status: {classRow.status}</span>
+                                    <span>Status: {effectiveRow.status}</span>
                                 </div>
                             )}
                         </div>
@@ -103,13 +122,13 @@ export default function ClassDetailsPage() {
                     {activeTab === 'overview' && (
                         <div className={styles.section}>
                             <h2 className={styles.sectionTitle}>Class Overview</h2>
-                            {classRow ? (
+                            {effectiveRow ? (
                                 <p style={{ lineHeight: 1.6 }}>
                                     No additional class details yet.
                                 </p>
                             ) : (
                                 <p style={{ lineHeight: 1.6 }}>
-                                    {loading ? 'Loading…' : 'No data available.'}
+                                    {effectiveRow === undefined ? 'Loading…' : 'No data available.'}
                                 </p>
                             )}
                         </div>
