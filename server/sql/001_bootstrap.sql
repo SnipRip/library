@@ -2,6 +2,7 @@
 -- Extensible later to full accounting schema.
 
 create extension if not exists "pgcrypto";
+create extension if not exists "btree_gist";
 
 -- Auth (minimal)
 create table if not exists users (
@@ -100,7 +101,7 @@ begin
     references account_master(id)
     on delete set null;
 exception
-  when duplicate_object then null;
+  when duplicate_object or duplicate_table then null;
 end $$;
 
 -- Library seats (minimal)
@@ -109,6 +110,7 @@ create table if not exists library_seats (
   seat_number text not null unique,
   hall text null,
   hall_id uuid null,
+  seat_type_id uuid null,
   status text not null default 'available',
   occupant_student_id uuid null references students(id) on delete set null,
   occupied_until timestamptz null,
@@ -116,13 +118,16 @@ create table if not exists library_seats (
   updated_at timestamptz not null default now()
 );
 
-create index if not exists idx_library_seats_status on library_seats (status);
-
 -- If the table existed from a previous bootstrap, ensure new columns exist.
 alter table library_seats add column if not exists hall text;
 alter table library_seats add column if not exists hall_id uuid;
+alter table library_seats add column if not exists seat_type_id uuid;
 alter table library_seats add column if not exists occupant_student_id uuid;
 alter table library_seats add column if not exists occupied_until timestamptz;
+
+create index if not exists idx_library_seats_status on library_seats (status);
+create index if not exists idx_library_seats_hall_id on library_seats (hall_id);
+create index if not exists idx_library_seats_seat_type_id on library_seats (seat_type_id);
 
 -- Library shifts (minimal)
 create table if not exists library_shifts (
@@ -147,7 +152,120 @@ create table if not exists library_halls (
 
 create index if not exists idx_library_halls_name on library_halls (name);
 
-create index if not exists idx_library_seats_hall_id on library_seats (hall_id);
+-- Seat types (e.g. General / Executive)
+create table if not exists library_seat_types (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- FK: library_seats.seat_type_id -> library_seat_types.id (safe for re-runs)
+do $$
+begin
+  alter table library_seats
+    add constraint fk_library_seats_seat_type_id
+    foreign key (seat_type_id)
+    references library_seat_types(id)
+    on delete set null;
+exception
+  when duplicate_object or duplicate_table then null;
+end $$;
+
+-- Shift pricing per seat type
+create table if not exists library_shift_pricing (
+  shift_id uuid not null references library_shifts(id) on delete cascade,
+  seat_type_id uuid not null references library_seat_types(id) on delete cascade,
+  monthly_fee integer not null check (monthly_fee >= 0),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (shift_id, seat_type_id)
+);
+
+create index if not exists idx_library_shift_pricing_shift_id on library_shift_pricing (shift_id);
+create index if not exists idx_library_shift_pricing_seat_type_id on library_shift_pricing (seat_type_id);
+
+-- Library memberships (admissions) — may optionally reserve a specific seat.
+create table if not exists library_memberships (
+  id uuid primary key default gen_random_uuid(),
+  student_id uuid not null references students(id) on delete cascade,
+  shift_id uuid not null references library_shifts(id) on delete restrict,
+  seat_type_id uuid not null references library_seat_types(id) on delete restrict,
+  start_date date not null default current_date,
+  end_date date null,
+  status text not null default 'active',
+  reserved_seat_id uuid null references library_seats(id) on delete set null,
+  reserved_fee integer null check (reserved_fee is null or reserved_fee >= 0),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_library_memberships_student_id on library_memberships (student_id);
+create index if not exists idx_library_memberships_shift_id on library_memberships (shift_id);
+create index if not exists idx_library_memberships_seat_type_id on library_memberships (seat_type_id);
+create index if not exists idx_library_memberships_reserved_seat_id on library_memberships (reserved_seat_id);
+
+-- Seat usage (check-in) with DB-level protection against overlapping usage.
+create table if not exists library_checkins (
+  id uuid primary key default gen_random_uuid(),
+  membership_id uuid not null references library_memberships(id) on delete cascade,
+  student_id uuid not null references students(id) on delete cascade,
+  shift_id uuid not null references library_shifts(id) on delete restrict,
+  seat_id uuid not null references library_seats(id) on delete restrict,
+  start_at timestamptz not null default now(),
+  end_at timestamptz not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_library_checkins_seat_id on library_checkins (seat_id);
+create index if not exists idx_library_checkins_student_id on library_checkins (student_id);
+create index if not exists idx_library_checkins_shift_id on library_checkins (shift_id);
+create index if not exists idx_library_checkins_membership_id on library_checkins (membership_id);
+
+-- Prevent two check-ins overlapping for the same seat.
+do $$
+begin
+  if exists (
+    select 1
+    from pg_constraint
+    where conname = 'ex_library_checkins_seat_overlap'
+  ) then
+    null;
+  else
+    execute 'drop index if exists ex_library_checkins_seat_overlap';
+    alter table library_checkins
+      add constraint ex_library_checkins_seat_overlap
+      exclude using gist (
+        seat_id with =,
+        tstzrange(start_at, end_at, '[)') with &&
+      );
+  end if;
+exception
+  when duplicate_object then null;
+end $$;
+
+-- Prevent a student from being checked into two seats at the same time.
+do $$
+begin
+  if exists (
+    select 1
+    from pg_constraint
+    where conname = 'ex_library_checkins_student_overlap'
+  ) then
+    null;
+  else
+    execute 'drop index if exists ex_library_checkins_student_overlap';
+    alter table library_checkins
+      add constraint ex_library_checkins_student_overlap
+      exclude using gist (
+        student_id with =,
+        tstzrange(start_at, end_at, '[)') with &&
+      );
+  end if;
+exception
+  when duplicate_object then null;
+end $$;
 
 -- FK: library_seats.hall_id -> library_halls.id (safe for re-runs)
 do $$

@@ -579,7 +579,37 @@ interface CreateShiftModalProps {
 export function CreateShiftModal({ isOpen, onClose, onCreated }: CreateShiftModalProps) {
     const [shiftData, setShiftData] = useState({ name: "", start: "", end: "" });
     const [monthlyFee, setMonthlyFee] = useState<string>('');
+    const [seatTypes, setSeatTypes] = useState<Array<{ id: string; name: string }>>([]);
+    const [pricingByType, setPricingByType] = useState<Record<string, string>>({});
     const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        if (!token) return;
+
+        const controller = new AbortController();
+        fetch(`${API_BASE_URL}/library/seat-types`, {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: controller.signal,
+        })
+            .then(async (res) => {
+                const body = await res.json().catch(() => ([]));
+                if (!res.ok) throw new Error('Failed to load seat types');
+                const list = Array.isArray(body) ? body : [];
+                setSeatTypes(list);
+                // Initialize pricing map only once per open.
+                const next: Record<string, string> = {};
+                for (const t of list) next[t.id] = '';
+                setPricingByType(next);
+            })
+            .catch(() => {
+                setSeatTypes([]);
+                setPricingByType({});
+            });
+
+        return () => controller.abort();
+    }, [isOpen]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -599,6 +629,22 @@ export function CreateShiftModal({ isOpen, onClose, onCreated }: CreateShiftModa
             return;
         }
 
+        // If seat types exist, require per-type pricing.
+        let pricing: Array<{ seat_type_id: string; monthly_fee: number }> | undefined;
+        if (seatTypes.length > 0) {
+            const rows: Array<{ seat_type_id: string; monthly_fee: number }> = [];
+            for (const t of seatTypes) {
+                const raw = (pricingByType[t.id] ?? '').trim();
+                const num = raw === '' ? NaN : Number(raw);
+                if (!Number.isFinite(num) || num < 0) {
+                    alert(`Please enter a valid monthly fee for ${t.name}`);
+                    return;
+                }
+                rows.push({ seat_type_id: t.id, monthly_fee: Math.trunc(num) });
+            }
+            pricing = rows;
+        }
+
         setSaving(true);
         try {
             const res = await fetch(`${API_BASE_URL}/library/shifts`, {
@@ -612,6 +658,7 @@ export function CreateShiftModal({ isOpen, onClose, onCreated }: CreateShiftModa
                     start_time: shiftData.start,
                     end_time: shiftData.end,
                     monthly_fee: parsedFee,
+                    pricing,
                 }),
             });
             const body = await res.json().catch(() => ({}));
@@ -619,6 +666,7 @@ export function CreateShiftModal({ isOpen, onClose, onCreated }: CreateShiftModa
 
             setShiftData({ name: '', start: '', end: '' });
             setMonthlyFee('');
+            setPricingByType({});
             onClose();
             onCreated?.();
         } catch (err: unknown) {
@@ -673,18 +721,114 @@ export function CreateShiftModal({ isOpen, onClose, onCreated }: CreateShiftModa
                 </div>
             </div>
 
+            {seatTypes.length > 0 ? (
+                <div className={styles.inputGroup}>
+                    <label className={styles.label}>Monthly Fee by Seat Type (₹)</label>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                        {seatTypes.map((t) => (
+                            <div key={t.id} className={styles.inputGroup} style={{ marginBottom: 0 }}>
+                                <label className={styles.label}>{t.name}</label>
+                                <input
+                                    type="number"
+                                    className={styles.input}
+                                    placeholder="e.g. 500"
+                                    value={pricingByType[t.id] ?? ''}
+                                    onChange={(e) => setPricingByType((p) => ({ ...p, [t.id]: e.target.value }))}
+                                    min={0}
+                                />
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            ) : (
+                <div className={styles.inputGroup}>
+                    <label className={styles.label}>Monthly Fee for this Shift (₹)</label>
+                    <input
+                        type="number"
+                        className={styles.input}
+                        placeholder="e.g. 500"
+                        value={monthlyFee}
+                        onChange={(e) => setMonthlyFee(e.target.value)}
+                        min={0}
+                    />
+                </div>
+            )}
+
+        </BaseModal>
+    );
+}
+
+interface AddSeatTypeModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+    onCreated?: () => void;
+}
+
+export function AddSeatTypeModal({ isOpen, onClose, onCreated }: AddSeatTypeModalProps) {
+    const [name, setName] = useState('');
+    const [saving, setSaving] = useState(false);
+
+    const handleClose = () => {
+        if (saving) return;
+        setName('');
+        onClose();
+    };
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        if (!token) {
+            alert('You are not logged in.');
+            return;
+        }
+
+        const trimmed = name.trim();
+        if (!trimmed) return;
+
+        setSaving(true);
+        try {
+            const res = await fetch(`${API_BASE_URL}/library/seat-types`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ name: trimmed }),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(body?.message || 'Failed to create seat type');
+
+            setName('');
+            onClose();
+            onCreated?.();
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            alert(message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <BaseModal
+            isOpen={isOpen}
+            onClose={handleClose}
+            title="Add Seat Type"
+            onSubmit={handleSubmit}
+            submitDisabled={saving || !name.trim()}
+            submitLabel={saving ? 'Saving...' : 'Save'}
+        >
             <div className={styles.inputGroup}>
-                <label className={styles.label}>Monthly Fee for this Shift (₹)</label>
+                <label className={styles.label}>Seat Type Name</label>
                 <input
-                    type="number"
+                    type="text"
                     className={styles.input}
-                    placeholder="e.g. 500"
-                    value={monthlyFee}
-                    onChange={(e) => setMonthlyFee(e.target.value)}
-                    min={0}
+                    placeholder="e.g. General / Executive"
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
                 />
             </div>
-
         </BaseModal>
     );
 }
@@ -700,7 +844,33 @@ export function AddSeatModal({ isOpen, onClose, onCreated }: AddSeatModalProps) 
     const [hallId, setHallId] = useState<string>('');
     const [halls, setHalls] = useState<Array<{ id: string; name: string }>>([]);
     const [loadingHalls, setLoadingHalls] = useState(false);
+    const [seatTypeId, setSeatTypeId] = useState<string>('');
+    const [seatTypes, setSeatTypes] = useState<Array<{ id: string; name: string }>>([]);
+    const [loadingSeatTypes, setLoadingSeatTypes] = useState(false);
     const [saving, setSaving] = useState(false);
+
+    function parseSeatNumbers(input: string): string[] {
+        const raw = input.trim();
+        if (!raw) return [];
+
+        const rangeMatch = raw.match(/^\s*(\d+)\s*-\s*(\d+)\s*$/);
+        if (rangeMatch) {
+            const start = Number(rangeMatch[1]);
+            const end = Number(rangeMatch[2]);
+            if (!Number.isInteger(start) || !Number.isInteger(end) || start <= 0 || end <= 0) return [];
+            if (end < start) return [];
+            const count = end - start + 1;
+            // Safety guard to prevent accidental huge inserts.
+            if (count > 500) return [];
+            return Array.from({ length: count }, (_, i) => String(start + i));
+        }
+
+        // Single seat number.
+        const singleMatch = raw.match(/^\d+$/);
+        if (singleMatch) return [raw];
+
+        return [];
+    }
 
     useEffect(() => {
         if (!isOpen) return;
@@ -726,6 +896,23 @@ export function AddSeatModal({ isOpen, onClose, onCreated }: AddSeatModalProps) 
             })
             .finally(() => setLoadingHalls(false));
 
+        setLoadingSeatTypes(true);
+        fetch(`${API_BASE_URL}/library/seat-types`, {
+            headers: {
+                Authorization: `Bearer ${token}`,
+            },
+            signal: controller.signal,
+        })
+            .then(async (res) => {
+                const body = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(body?.message || 'Failed to load seat types');
+                setSeatTypes(Array.isArray(body) ? body : []);
+            })
+            .catch(() => {
+                setSeatTypes([]);
+            })
+            .finally(() => setLoadingSeatTypes(false));
+
         return () => controller.abort();
     }, [isOpen]);
 
@@ -736,23 +923,37 @@ export function AddSeatModal({ isOpen, onClose, onCreated }: AddSeatModalProps) 
             alert('You are not logged in.');
             return;
         }
+
+        const seatNumbers = parseSeatNumbers(seatNumber);
+        if (seatNumbers.length === 0) {
+            alert('Enter a seat number or a range like 1-26 (max 500).');
+            return;
+        }
         setSaving(true);
         try {
-            const res = await fetch(`${API_BASE_URL}/library/seats`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${token}`,
-                },
-                body: JSON.stringify({ seat_number: seatNumber, hall_id: hallId || null }),
-            });
-            const body = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(body?.message || 'Failed to add seat');
-            alert('Seat Added!');
+            for (const num of seatNumbers) {
+                const res = await fetch(`${API_BASE_URL}/library/seats`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({
+                        seat_number: num,
+                        hall_id: hallId || null,
+                        seat_type_id: seatTypeId || null,
+                    }),
+                });
+                const body = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(body?.message || `Failed to add seat ${num}`);
+            }
+
+            alert(seatNumbers.length === 1 ? 'Seat Added!' : `${seatNumbers.length} Seats Added!`);
             onCreated?.();
             onClose();
             setSeatNumber('');
             setHallId('');
+            setSeatTypeId('');
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);
             alert(message);
@@ -775,7 +976,7 @@ export function AddSeatModal({ isOpen, onClose, onCreated }: AddSeatModalProps) 
                 <input
                     type="text"
                     className={styles.input}
-                    placeholder="e.g. 25"
+                    placeholder="e.g. 1 or 1-26"
                     required
                     value={seatNumber}
                     onChange={(e) => setSeatNumber(e.target.value)}
@@ -793,6 +994,23 @@ export function AddSeatModal({ isOpen, onClose, onCreated }: AddSeatModalProps) 
                     {halls.map((h) => (
                         <option key={h.id} value={h.id}>
                             {h.name}
+                        </option>
+                    ))}
+                </select>
+            </div>
+
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Seat Type</label>
+                <select
+                    className={styles.input}
+                    value={seatTypeId}
+                    onChange={(e) => setSeatTypeId(e.target.value)}
+                    disabled={loadingSeatTypes || seatTypes.length === 0}
+                >
+                    <option value="">{loadingSeatTypes ? 'Loading seat types...' : seatTypes.length === 0 ? 'No seat types yet' : 'Select seat type'}</option>
+                    {seatTypes.map((t) => (
+                        <option key={t.id} value={t.id}>
+                            {t.name}
                         </option>
                     ))}
                 </select>
@@ -871,6 +1089,316 @@ export function AddHallModal({ isOpen, onClose, onCreated }: AddHallModalProps) 
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                 />
+            </div>
+        </BaseModal>
+    );
+}
+
+interface CreateMembershipModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+    defaultShiftId?: string | null;
+    defaultSeatTypeId?: string | null;
+    defaultReservedSeatId?: string | null;
+    onCreated?: () => void;
+}
+
+export function CreateMembershipModal({
+    isOpen,
+    onClose,
+    defaultShiftId,
+    defaultSeatTypeId,
+    defaultReservedSeatId,
+    onCreated,
+}: CreateMembershipModalProps) {
+    const [saving, setSaving] = useState(false);
+    const [students, setStudents] = useState<Array<{ id: string; full_name: string }>>([]);
+    const [shifts, setShifts] = useState<Array<{ id: string; name: string }>>([]);
+    const [seatTypes, setSeatTypes] = useState<Array<{ id: string; name: string }>>([]);
+    const [seats, setSeats] = useState<Array<{ id: string; seat_number: string; seat_type_id: string | null }>>([]);
+
+    const [studentId, setStudentId] = useState('');
+    const [shiftId, setShiftId] = useState('');
+    const [seatTypeId, setSeatTypeId] = useState('');
+    const [reservedSeatId, setReservedSeatId] = useState('');
+    const [startDate, setStartDate] = useState('');
+    const [endDate, setEndDate] = useState('');
+    const [reservedFee, setReservedFee] = useState('');
+
+    useEffect(() => {
+        if (!isOpen) return;
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        if (!token) return;
+
+        const controller = new AbortController();
+        Promise.all([
+            fetch(`${API_BASE_URL}/students`, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal }),
+            fetch(`${API_BASE_URL}/library/shifts`, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal }),
+            fetch(`${API_BASE_URL}/library/seat-types`, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal }),
+            fetch(`${API_BASE_URL}/library/seats`, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal }),
+        ])
+            .then(async ([studentsRes, shiftsRes, typesRes, seatsRes]) => {
+                const studentsBody = studentsRes.ok ? await studentsRes.json().catch(() => ([])) : [];
+                const shiftsBody = shiftsRes.ok ? await shiftsRes.json().catch(() => ([])) : [];
+                const typesBody = typesRes.ok ? await typesRes.json().catch(() => ([])) : [];
+                const seatsBody = seatsRes.ok ? await seatsRes.json().catch(() => ([])) : [];
+
+                setStudents(Array.isArray(studentsBody) ? studentsBody : []);
+                setShifts(Array.isArray(shiftsBody) ? shiftsBody : []);
+                setSeatTypes(Array.isArray(typesBody) ? typesBody : []);
+                setSeats(Array.isArray(seatsBody) ? seatsBody : []);
+            })
+            .catch(() => {
+                setStudents([]);
+                setShifts([]);
+                setSeatTypes([]);
+                setSeats([]);
+            });
+
+        // Apply defaults
+        setShiftId(defaultShiftId || '');
+        setSeatTypeId(defaultSeatTypeId || '');
+        setReservedSeatId(defaultReservedSeatId || '');
+
+        return () => controller.abort();
+    }, [isOpen, defaultShiftId, defaultSeatTypeId, defaultReservedSeatId]);
+
+    const reservedSeatOptions = seats
+        .filter((s) => (seatTypeId ? s.seat_type_id === seatTypeId : true))
+        .sort((a, b) => Number(a.seat_number) - Number(b.seat_number));
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        if (!token) {
+            alert('You are not logged in.');
+            return;
+        }
+
+        if (!studentId || !shiftId || !seatTypeId) {
+            alert('Student, shift and seat type are required');
+            return;
+        }
+
+        const parsedReservedFee = reservedFee.trim() ? Number(reservedFee) : null;
+        if (reservedFee.trim() && (!Number.isFinite(parsedReservedFee) || parsedReservedFee! < 0)) {
+            alert('Please enter a valid reserved fee');
+            return;
+        }
+
+        setSaving(true);
+        try {
+            const res = await fetch(`${API_BASE_URL}/library/memberships`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({
+                    student_id: studentId,
+                    shift_id: shiftId,
+                    seat_type_id: seatTypeId,
+                    start_date: startDate || undefined,
+                    end_date: endDate || null,
+                    reserved_seat_id: reservedSeatId || null,
+                    reserved_fee: parsedReservedFee,
+                }),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(body?.message || 'Failed to create admission');
+
+            onClose();
+            onCreated?.();
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            alert(message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <BaseModal
+            isOpen={isOpen}
+            onClose={onClose}
+            title="Library Admission"
+            onSubmit={handleSubmit}
+            submitDisabled={saving}
+            submitLabel={saving ? 'Saving...' : 'Save'}
+        >
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Student</label>
+                <select className={styles.input} value={studentId} onChange={(e) => setStudentId(e.target.value)} required>
+                    <option value="">Select student</option>
+                    {students.map((s) => (
+                        <option key={s.id} value={s.id}>
+                            {s.full_name}
+                        </option>
+                    ))}
+                </select>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className={styles.inputGroup}>
+                    <label className={styles.label}>Shift</label>
+                    <select className={styles.input} value={shiftId} onChange={(e) => setShiftId(e.target.value)} required>
+                        <option value="">Select shift</option>
+                        {shifts.map((sh) => (
+                            <option key={sh.id} value={sh.id}>
+                                {sh.name}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+                <div className={styles.inputGroup}>
+                    <label className={styles.label}>Seat Type</label>
+                    <select className={styles.input} value={seatTypeId} onChange={(e) => setSeatTypeId(e.target.value)} required>
+                        <option value="">Select seat type</option>
+                        {seatTypes.map((t) => (
+                            <option key={t.id} value={t.id}>
+                                {t.name}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className={styles.inputGroup}>
+                    <label className={styles.label}>Start Date (optional)</label>
+                    <input type="date" className={styles.input} value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                </div>
+                <div className={styles.inputGroup}>
+                    <label className={styles.label}>End Date (optional)</label>
+                    <input type="date" className={styles.input} value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+                </div>
+            </div>
+
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Reserved Seat (optional)</label>
+                <select className={styles.input} value={reservedSeatId} onChange={(e) => setReservedSeatId(e.target.value)} disabled={!seatTypeId}>
+                    <option value="">No reserved seat</option>
+                    {reservedSeatOptions.map((s) => (
+                        <option key={s.id} value={s.id}>
+                            Seat {s.seat_number}
+                        </option>
+                    ))}
+                </select>
+            </div>
+
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Reserved Seat Fee (₹) (optional)</label>
+                <input
+                    type="number"
+                    className={styles.input}
+                    placeholder="e.g. 200"
+                    value={reservedFee}
+                    onChange={(e) => setReservedFee(e.target.value)}
+                    min={0}
+                    disabled={!reservedSeatId}
+                />
+            </div>
+        </BaseModal>
+    );
+}
+
+interface CheckInSeatModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+    shiftId: string;
+    seatId: string;
+    seatTypeId?: string | null;
+    onCheckedIn?: () => void;
+}
+
+export function CheckInSeatModal({ isOpen, onClose, shiftId, seatId, seatTypeId, onCheckedIn }: CheckInSeatModalProps) {
+    const [saving, setSaving] = useState(false);
+    const [memberships, setMemberships] = useState<Array<{ id: string; student_name: string; reserved_seat_id?: string | null }>>([]);
+    const [membershipId, setMembershipId] = useState('');
+
+    useEffect(() => {
+        if (!isOpen) return;
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        if (!token) return;
+        const controller = new AbortController();
+
+        const qs = new URLSearchParams();
+        qs.set('shift_id', shiftId);
+        if (seatTypeId) qs.set('seat_type_id', seatTypeId);
+        qs.set('active', 'true');
+
+        fetch(`${API_BASE_URL}/library/memberships?${qs.toString()}`, {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: controller.signal,
+        })
+            .then(async (res) => {
+                const body = await res.json().catch(() => ([]));
+                if (!res.ok) throw new Error('Failed to load admissions');
+                const list = Array.isArray(body) ? body : [];
+                // Only allow non-reserved admissions here.
+                setMemberships(list.filter((m) => !m.reserved_seat_id));
+                setMembershipId('');
+            })
+            .catch(() => {
+                setMemberships([]);
+            });
+
+        return () => controller.abort();
+    }, [isOpen, shiftId, seatTypeId]);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        if (!token) {
+            alert('You are not logged in.');
+            return;
+        }
+        if (!membershipId) {
+            alert('Please select a student admission');
+            return;
+        }
+        setSaving(true);
+        try {
+            const res = await fetch(`${API_BASE_URL}/library/checkins`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ membership_id: membershipId, seat_id: seatId }),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(body?.message || 'Check-in failed');
+
+            onClose();
+            onCheckedIn?.();
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            alert(message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <BaseModal
+            isOpen={isOpen}
+            onClose={onClose}
+            title="Check In Student"
+            onSubmit={handleSubmit}
+            submitDisabled={saving}
+            submitLabel={saving ? 'Saving...' : 'Check In'}
+        >
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Admission</label>
+                <select className={styles.input} value={membershipId} onChange={(e) => setMembershipId(e.target.value)} required>
+                    <option value="">Select student</option>
+                    {memberships.map((m) => (
+                        <option key={m.id} value={m.id}>
+                            {m.student_name}
+                        </option>
+                    ))}
+                </select>
             </div>
         </BaseModal>
     );
