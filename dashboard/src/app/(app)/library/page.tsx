@@ -10,7 +10,11 @@ import {
   AddSeatTypeModal,
   CreateMembershipModal,
   CheckInSeatModal,
+  DeleteHallModal,
+  EditShiftPricesModal,
+  EditHallModal,
 } from '@/components/modals/Modals';
+import LibrarySettingsModal from '@/components/modals/LibrarySettingsModal';
 import { API_BASE_URL } from '@/lib/api';
 
 interface Seat {
@@ -33,9 +37,16 @@ interface Shift {
   name: string;
   start_time: string;
   end_time: string;
+  monthly_fee?: number | null;
+  pricing?: Array<{ seat_type_id: string; seat_type_name: string; monthly_fee: number }>;
 }
 
 interface Hall {
+  id: string;
+  name: string;
+}
+
+interface SeatType {
   id: string;
   name: string;
 }
@@ -88,12 +99,28 @@ async function loadHalls(setHalls: React.Dispatch<React.SetStateAction<Hall[]>>)
   }
 }
 
+async function loadSeatTypes(setSeatTypes: React.Dispatch<React.SetStateAction<SeatType[]>>) {
+  try {
+    const token = localStorage.getItem('token');
+    const res = await fetch(`${API_BASE_URL}/library/seat-types`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return;
+    const body = await res.json();
+    setSeatTypes(Array.isArray(body) ? body : []);
+  } catch (err) {
+    console.error(err);
+  }
+}
+
 export default function LibraryPage() {
   const [activeShiftId, setActiveShiftId] = useState<string | null>(null);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [selectedSeat, setSelectedSeat] = useState<Seat | null>(null);
   const [seats, setSeats] = useState<Seat[]>([]);
+  const [allSeats, setAllSeats] = useState<Seat[]>([]);
   const [halls, setHalls] = useState<Hall[]>([]);
+  const [seatTypes, setSeatTypes] = useState<SeatType[]>([]);
 
   const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
   const [isSeatModalOpen, setIsSeatModalOpen] = useState(false);
@@ -101,6 +128,12 @@ export default function LibraryPage() {
   const [isSeatTypeModalOpen, setIsSeatTypeModalOpen] = useState(false);
   const [isMembershipModalOpen, setIsMembershipModalOpen] = useState(false);
   const [isCheckInModalOpen, setIsCheckInModalOpen] = useState(false);
+  const [isDeleteHallModalOpen, setIsDeleteHallModalOpen] = useState(false);
+  const [isEditShiftPricesModalOpen, setIsEditShiftPricesModalOpen] = useState(false);
+  const [shiftIdForPrices, setShiftIdForPrices] = useState<string | null>(null);
+  const [isLibrarySettingsOpen, setIsLibrarySettingsOpen] = useState(false);
+  const [isEditHallModalOpen, setIsEditHallModalOpen] = useState(false);
+  const [editingHall, setEditingHall] = useState<Hall | null>(null);
 
   const [membershipDefaultSeatTypeId, setMembershipDefaultSeatTypeId] = useState<string | null>(null);
   const [membershipDefaultReservedSeatId, setMembershipDefaultReservedSeatId] = useState<string | null>(null);
@@ -111,15 +144,160 @@ export default function LibraryPage() {
   useEffect(() => {
     void loadShifts(setShifts);
     void loadHalls(setHalls);
+    void loadSeatTypes(setSeatTypes);
+    void loadSeats(setAllSeats, null);
   }, []);
 
   useEffect(() => {
     void loadSeats(setSeats, effectiveShiftId);
   }, [effectiveShiftId]);
 
+  const refreshSeats = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const url = effectiveShiftId
+        ? `${API_BASE_URL}/library/seats?shift_id=${encodeURIComponent(effectiveShiftId)}`
+        : `${API_BASE_URL}/library/seats`;
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const body = await res.json();
+      const nextSeats = Array.isArray(body) ? (body as Seat[]) : [];
+      setSeats(nextSeats);
+      setSelectedSeat((prev) => (prev ? nextSeats.find((s) => s.id === prev.id) ?? null : prev));
+      void loadSeats(setAllSeats, null);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const updateSeatStatus = async (seatId: string, status: Seat['status']) => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_BASE_URL}/library/seats/${seatId}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ status }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        alert(body?.message || 'Failed to update seat');
+        return;
+      }
+
+      await refreshSeats();
+    } catch (err) {
+      console.error(err);
+      alert('Failed to update seat');
+    }
+  };
+
+  const vacateSeat = async (seat: Seat) => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_BASE_URL}/library/seats/${seat.id}/vacate`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(seat.active_checkin_id ? { checkin_id: seat.active_checkin_id } : {}),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        alert(body?.message || 'Failed to vacate seat');
+        return;
+      }
+
+      await refreshSeats();
+    } catch (err) {
+      console.error(err);
+      alert('Failed to vacate seat');
+    }
+  };
+
+  const deleteSeat = async (seatId: string) => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_BASE_URL}/library/seats/${seatId}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        alert(body?.message || 'Failed to delete seat');
+        return;
+      }
+
+      setSelectedSeat(null);
+      await refreshSeats();
+    } catch (err) {
+      console.error(err);
+      alert('Failed to delete seat');
+    }
+  };
+
+  const openEditShiftPrices = (shiftId: string) => {
+    setShiftIdForPrices(shiftId);
+    setIsEditShiftPricesModalOpen(true);
+  };
+
+  const deleteShift = async (shiftId: string) => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_BASE_URL}/library/shifts/${shiftId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        alert(body?.message || 'Failed to delete shift');
+        return;
+      }
+
+      await loadShifts(setShifts);
+    } catch (err) {
+      console.error(err);
+      alert('Failed to delete shift');
+    }
+  };
+
+  const deleteHall = async (hallId: string) => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_BASE_URL}/library/halls/${hallId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        alert(body?.message || 'Failed to delete hall');
+        return;
+      }
+      await loadHalls(setHalls);
+      await loadSeats(setAllSeats, null);
+      await loadSeats(setSeats, effectiveShiftId);
+      setSelectedSeat(null);
+    } catch (err) {
+      console.error(err);
+      alert('Failed to delete hall');
+    }
+  };
+
   const hallsFromSeats = Array.from(
     new Set(seats.map((s) => (s.hall_name || s.hall || '').trim()).filter(Boolean)),
   );
+
   const hallLabelFromHalls = halls.length === 1 ? halls[0].name : halls.length > 1 ? 'All Halls' : '';
   const hallLabel =
     hallsFromSeats.length === 1
@@ -132,33 +310,8 @@ export default function LibraryPage() {
     (a.seat_number ?? '').localeCompare(b.seat_number ?? '', undefined, { numeric: true, sensitivity: 'base' }),
   );
 
-  async function updateSeatStatus(seatId: string, status: Seat['status']) {
-    try {
-      const token = localStorage.getItem('token');
-      await fetch(`${API_BASE_URL}/library/seats/${seatId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ status }),
-      });
-      await loadSeats(setSeats, activeShiftId);
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
-  async function vacateSeat(seat: Seat) {
-    try {
-      const token = localStorage.getItem('token');
-      await fetch(`${API_BASE_URL}/library/seats/${seat.id}/vacate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: seat.active_checkin_id ? JSON.stringify({ checkin_id: seat.active_checkin_id }) : JSON.stringify({}),
-      });
-      await loadSeats(setSeats, activeShiftId);
-    } catch (err) {
-      console.error(err);
-    }
-  }
+  const selectedSeatCannotBeDeleted =
+    !!selectedSeat && (selectedSeat.is_reserved || selectedSeat.status === 'occupied' || !!selectedSeat.active_checkin_id);
 
   return (
     <>
@@ -179,42 +332,6 @@ export default function LibraryPage() {
                 {shift.name}
               </button>
             ))}
-
-            <button
-              onClick={() => setIsShiftModalOpen(true)}
-              style={{
-                padding: '0.5rem 1rem',
-                background: '#3b82f6',
-                color: 'white',
-                border: 'none',
-                borderRadius: '0.5rem',
-                fontSize: '0.875rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              + Add Shift
-            </button>
-
-            <button
-              onClick={() => {
-                setMembershipDefaultSeatTypeId(null);
-                setMembershipDefaultReservedSeatId(null);
-                setIsMembershipModalOpen(true);
-              }}
-              style={{
-                padding: '0.5rem 1rem',
-                background: '#0f172a',
-                color: 'white',
-                border: 'none',
-                borderRadius: '0.5rem',
-                fontSize: '0.875rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              + Add Admission
-            </button>
           </div>
         </div>
 
@@ -227,7 +344,10 @@ export default function LibraryPage() {
         <AddSeatModal
           isOpen={isSeatModalOpen}
           onClose={() => setIsSeatModalOpen(false)}
-          onCreated={() => loadSeats(setSeats, effectiveShiftId)}
+          onCreated={() => {
+            void loadSeats(setSeats, effectiveShiftId);
+            void loadSeats(setAllSeats, null);
+          }}
         />
 
         <AddHallModal
@@ -235,10 +355,87 @@ export default function LibraryPage() {
           onClose={() => setIsHallModalOpen(false)}
           onCreated={() => {
             void loadHalls(setHalls);
+            void loadSeats(setAllSeats, null);
           }}
         />
 
-        <AddSeatTypeModal isOpen={isSeatTypeModalOpen} onClose={() => setIsSeatTypeModalOpen(false)} />
+        <AddSeatTypeModal
+          isOpen={isSeatTypeModalOpen}
+          onClose={() => setIsSeatTypeModalOpen(false)}
+          onCreated={() => {
+            void loadSeatTypes(setSeatTypes);
+            void loadShifts(setShifts);
+          }}
+        />
+
+        {hasHalls ? (
+          <DeleteHallModal
+            isOpen={isDeleteHallModalOpen}
+            onClose={() => setIsDeleteHallModalOpen(false)}
+            onDeleted={() => {
+              void loadHalls(setHalls);
+              void loadSeats(setSeats, effectiveShiftId);
+              void loadSeats(setAllSeats, null);
+            }}
+          />
+        ) : null}
+
+        {editingHall ? (
+          <EditHallModal
+            isOpen={isEditHallModalOpen}
+            onClose={() => setIsEditHallModalOpen(false)}
+            hallId={editingHall.id}
+            defaultName={editingHall.name}
+            onUpdated={() => {
+              void loadHalls(setHalls);
+              void loadSeats(setAllSeats, null);
+              void loadSeats(setSeats, effectiveShiftId);
+            }}
+          />
+        ) : null}
+
+        {shiftIdForPrices || effectiveShiftId ? (
+          <EditShiftPricesModal
+            isOpen={isEditShiftPricesModalOpen}
+            onClose={() => setIsEditShiftPricesModalOpen(false)}
+            shiftId={shiftIdForPrices ?? effectiveShiftId!}
+            onUpdated={() => {
+              void loadShifts(setShifts);
+            }}
+          />
+        ) : null}
+
+        <LibrarySettingsModal
+          isOpen={isLibrarySettingsOpen}
+          onClose={() => setIsLibrarySettingsOpen(false)}
+          halls={halls}
+          seatCountsByHallId={allSeats.reduce<Record<string, { active: number; inactive: number }>>((acc, s) => {
+            if (!s.hall_id) return acc;
+            const current = acc[s.hall_id] ?? { active: 0, inactive: 0 };
+            if (s.status === 'maintenance') current.inactive += 1;
+            else current.active += 1;
+            acc[s.hall_id] = current;
+            return acc;
+          }, {})}
+          seatTypes={seatTypes}
+          shifts={shifts}
+          onEditHall={(hall) => {
+            setEditingHall(hall);
+            setIsEditHallModalOpen(true);
+          }}
+          onDeleteHall={(hallId) => void deleteHall(hallId)}
+          onOpenAddSeat={() => setIsSeatModalOpen(true)}
+          onOpenSeatTypes={() => setIsSeatTypeModalOpen(true)}
+          onOpenAddHall={() => setIsHallModalOpen(true)}
+          onOpenAddShift={() => setIsShiftModalOpen(true)}
+          onEditShiftPrices={(shiftId) => openEditShiftPrices(shiftId)}
+          onDeleteShift={(shiftId) => void deleteShift(shiftId)}
+          onOpenAddAdmission={() => {
+            setMembershipDefaultSeatTypeId(null);
+            setMembershipDefaultReservedSeatId(null);
+            setIsMembershipModalOpen(true);
+          }}
+        />
 
         <CreateMembershipModal
           isOpen={isMembershipModalOpen}
@@ -263,59 +460,11 @@ export default function LibraryPage() {
         <div className={styles.mainLayout}>
           <div className={styles.seatMap}>
             <div className={styles.mapHeader}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+              <div className={styles.roomHeaderLeft}>
                 {hallLabel ? <h3 style={{ fontSize: '1.1rem', fontWeight: 600 }}>{hallLabel}</h3> : null}
 
-                {hasHalls ? (
-                  <button
-                    onClick={() => setIsSeatModalOpen(true)}
-                    style={{
-                      padding: '0.25rem 0.5rem',
-                      fontSize: '0.75rem',
-                      background: '#e2e8f0',
-                      border: 'none',
-                      borderRadius: '0.25rem',
-                      cursor: 'pointer',
-                      color: '#475569',
-                      fontWeight: 600,
-                    }}
-                  >
-                    + Add Seat
-                  </button>
-                ) : null}
-
-                {hasHalls ? (
-                  <button
-                    onClick={() => setIsSeatTypeModalOpen(true)}
-                    style={{
-                      padding: '0.25rem 0.5rem',
-                      fontSize: '0.75rem',
-                      background: '#f1f5f9',
-                      border: '1px solid #e2e8f0',
-                      borderRadius: '0.25rem',
-                      cursor: 'pointer',
-                      color: '#475569',
-                      fontWeight: 600,
-                    }}
-                  >
-                    + Seat Type
-                  </button>
-                ) : null}
-
-                <button
-                  onClick={() => setIsHallModalOpen(true)}
-                  style={{
-                    padding: '0.25rem 0.5rem',
-                    fontSize: '0.75rem',
-                    background: '#f1f5f9',
-                    border: '1px solid #e2e8f0',
-                    borderRadius: '0.25rem',
-                    cursor: 'pointer',
-                    color: '#475569',
-                    fontWeight: 600,
-                  }}
-                >
-                  + New Hall
+                <button className={styles.roomToolbarBtn} onClick={() => setIsLibrarySettingsOpen(true)}>
+                  Settings
                 </button>
               </div>
 
@@ -422,6 +571,15 @@ export default function LibraryPage() {
                     </>
                   ) : null}
 
+                  {selectedSeat.status !== 'maintenance' ? (
+                    <button
+                      className={`${styles.btn} ${styles.btnSecondary}`}
+                      onClick={() => updateSeatStatus(selectedSeat.id, 'maintenance')}
+                    >
+                      Mark Unserviceable
+                    </button>
+                  ) : null}
+
                   {selectedSeat.status === 'occupied' && selectedSeat.is_reserved ? (
                     <button className={`${styles.btn} ${styles.btnSecondary}`} disabled>
                       Reserved Seat
@@ -439,6 +597,21 @@ export default function LibraryPage() {
                       Mark Available
                     </button>
                   ) : null}
+
+                  <button
+                    className={`${styles.btn} ${styles.btnSecondary}`}
+                    onClick={() => {
+                      if (selectedSeatCannotBeDeleted) {
+                        alert('Reserved or occupied seats cannot be deleted.');
+                        return;
+                      }
+                      if (!confirm('Delete this seat? This cannot be undone.')) return;
+                      void deleteSeat(selectedSeat.id);
+                    }}
+                    disabled={selectedSeatCannotBeDeleted}
+                  >
+                    Delete Seat
+                  </button>
                 </div>
               </>
             ) : (

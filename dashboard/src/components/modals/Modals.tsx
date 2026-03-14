@@ -1094,6 +1094,484 @@ export function AddHallModal({ isOpen, onClose, onCreated }: AddHallModalProps) 
     );
 }
 
+interface EditHallModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+    hallId: string;
+    defaultName: string;
+    onUpdated?: () => void;
+}
+
+export function EditHallModal({ isOpen, onClose, hallId, defaultName, onUpdated }: EditHallModalProps) {
+    const [name, setName] = useState(defaultName);
+    const [loadingSeats, setLoadingSeats] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [seats, setSeats] = useState<Array<{ id: string; seat_number: string; status: 'available' | 'occupied' | 'maintenance' }>>(
+        [],
+    );
+
+    const refreshSeats = async () => {
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        if (!token) return;
+
+        setLoadingSeats(true);
+        try {
+            const res = await fetch(`${API_BASE_URL}/library/seats`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            const body = await res.json().catch(() => ([]));
+            if (!res.ok) throw new Error('Failed to load seats');
+            const list = Array.isArray(body) ? body : [];
+            const filtered = list
+                .filter((s: any) => s?.hall_id === hallId)
+                .map((s: any) => ({
+                    id: String(s.id),
+                    seat_number: String(s.seat_number ?? ''),
+                    status: s.status as 'available' | 'occupied' | 'maintenance',
+                }))
+                .sort((a: any, b: any) =>
+                    String(a.seat_number).localeCompare(String(b.seat_number), undefined, { numeric: true, sensitivity: 'base' }),
+                );
+            setSeats(filtered);
+        } catch {
+            setSeats([]);
+        } finally {
+            setLoadingSeats(false);
+        }
+    };
+
+    useEffect(() => {
+        if (!isOpen) return;
+        setName(defaultName);
+        void refreshSeats();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isOpen, hallId, defaultName]);
+
+    const updateSeatStatus = async (seatId: string, status: 'available' | 'occupied' | 'maintenance') => {
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        if (!token) return;
+        try {
+            const res = await fetch(`${API_BASE_URL}/library/seats/${seatId}`, {
+                method: 'PATCH',
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ status }),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(body?.message || 'Failed to update seat');
+            await refreshSeats();
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            alert(message);
+        }
+    };
+
+    const deleteSeat = async (seatId: string) => {
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        if (!token) return;
+        if (!confirm('Delete this seat? This cannot be undone.')) return;
+        try {
+            const res = await fetch(`${API_BASE_URL}/library/seats/${seatId}`, {
+                method: 'DELETE',
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(body?.message || 'Failed to delete seat');
+            await refreshSeats();
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            alert(message);
+        }
+    };
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        if (!token) {
+            alert('You are not logged in.');
+            return;
+        }
+
+        const trimmed = name.trim();
+        if (!trimmed) return;
+
+        setSaving(true);
+        try {
+            const res = await fetch(`${API_BASE_URL}/library/halls/${hallId}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ name: trimmed }),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(body?.message || 'Failed to update hall');
+
+            onClose();
+            onUpdated?.();
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            alert(message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <BaseModal
+            isOpen={isOpen}
+            onClose={onClose}
+            title="Edit Hall"
+            onSubmit={handleSubmit}
+            submitDisabled={saving || !name.trim()}
+            submitLabel={saving ? 'Saving...' : 'Save'}
+        >
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Hall Name</label>
+                <input
+                    type="text"
+                    className={styles.input}
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                />
+            </div>
+
+            <div style={{ marginTop: '1rem' }}>
+                <div style={{ fontWeight: 700, marginBottom: '0.5rem' }}>Seats in this Hall</div>
+                <div style={{ overflowX: 'auto', border: '1px solid #e2e8f0', borderRadius: '0.5rem' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                        <thead>
+                            <tr>
+                                <th style={{ textAlign: 'center', verticalAlign: 'middle', padding: '0.5rem', borderBottom: '1px solid #e2e8f0' }}>Seat</th>
+                                <th style={{ textAlign: 'center', verticalAlign: 'middle', padding: '0.5rem', borderBottom: '1px solid #e2e8f0' }}>Status</th>
+                                <th style={{ textAlign: 'center', verticalAlign: 'middle', padding: '0.5rem', borderBottom: '1px solid #e2e8f0' }}>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {loadingSeats ? (
+                                <tr>
+                                    <td style={{ padding: '0.5rem' }} colSpan={3}>
+                                        Loading...
+                                    </td>
+                                </tr>
+                            ) : seats.length === 0 ? (
+                                <tr>
+                                    <td style={{ padding: '0.5rem', textAlign: 'center', verticalAlign: 'middle' }} colSpan={3}>
+                                        No seats found.
+                                    </td>
+                                </tr>
+                            ) : (
+                                seats.map((s) => (
+                                    <tr key={s.id}>
+                                        <td style={{ padding: '0.5rem', borderBottom: '1px solid #e2e8f0', textAlign: 'center', verticalAlign: 'middle' }}>
+                                            #{s.seat_number}
+                                        </td>
+                                        <td
+                                            style={{
+                                                padding: '0.5rem',
+                                                borderBottom: '1px solid #e2e8f0',
+                                                textTransform: 'capitalize',
+                                                textAlign: 'center',
+                                                verticalAlign: 'middle',
+                                            }}
+                                        >
+                                            {s.status}
+                                        </td>
+                                        <td style={{ padding: '0.5rem', borderBottom: '1px solid #e2e8f0', textAlign: 'center', verticalAlign: 'middle' }}>
+                                            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                                {s.status === 'maintenance' ? (
+                                                    <button
+                                                        type="button"
+                                                        className={styles.secondaryBtn}
+                                                        onClick={() => void updateSeatStatus(s.id, 'available')}
+                                                    >
+                                                        Mark Available
+                                                    </button>
+                                                ) : (
+                                                    <button
+                                                        type="button"
+                                                        className={styles.secondaryBtn}
+                                                        onClick={() => void updateSeatStatus(s.id, 'maintenance')}
+                                                    >
+                                                        Mark Unserviceable
+                                                    </button>
+                                                )}
+                                                <button
+                                                    type="button"
+                                                    className={styles.dangerBtn}
+                                                    onClick={() => void deleteSeat(s.id)}
+                                                >
+                                                    Delete
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </BaseModal>
+    );
+}
+
+interface DeleteHallModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+    onDeleted?: () => void;
+}
+
+export function DeleteHallModal({ isOpen, onClose, onDeleted }: DeleteHallModalProps) {
+    const [halls, setHalls] = useState<Array<{ id: string; name: string }>>([]);
+    const [hallId, setHallId] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        if (!token) return;
+
+        const controller = new AbortController();
+        setLoading(true);
+        fetch(`${API_BASE_URL}/library/halls`, {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: controller.signal,
+        })
+            .then(async (res) => {
+                const body = await res.json().catch(() => ([]));
+                if (!res.ok) throw new Error('Failed to load halls');
+                const list = Array.isArray(body) ? body : [];
+                setHalls(list);
+                setHallId(list[0]?.id ?? '');
+            })
+            .catch(() => {
+                setHalls([]);
+                setHallId('');
+            })
+            .finally(() => setLoading(false));
+
+        return () => controller.abort();
+    }, [isOpen]);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        if (!token) {
+            alert('You are not logged in.');
+            return;
+        }
+        if (!hallId) return;
+        if (!confirm('Delete this hall? Seats will be unassigned from this hall.')) return;
+
+        setSaving(true);
+        try {
+            const res = await fetch(`${API_BASE_URL}/library/halls/${hallId}`, {
+                method: 'DELETE',
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(body?.message || 'Failed to delete hall');
+
+            onClose();
+            onDeleted?.();
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            alert(message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <BaseModal
+            isOpen={isOpen}
+            onClose={onClose}
+            title="Delete Hall"
+            onSubmit={handleSubmit}
+            submitDisabled={saving || loading || !hallId}
+            submitLabel={saving ? 'Deleting...' : 'Delete'}
+        >
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Hall</label>
+                <select
+                    className={styles.input}
+                    value={hallId}
+                    onChange={(e) => setHallId(e.target.value)}
+                    disabled={loading || halls.length === 0}
+                >
+                    {halls.length === 0 ? (
+                        <option value="">{loading ? 'Loading...' : 'No halls found'}</option>
+                    ) : null}
+                    {halls.map((h) => (
+                        <option key={h.id} value={h.id}>
+                            {h.name}
+                        </option>
+                    ))}
+                </select>
+            </div>
+        </BaseModal>
+    );
+}
+
+interface EditShiftPricesModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+    shiftId: string;
+    onUpdated?: () => void;
+}
+
+export function EditShiftPricesModal({ isOpen, onClose, shiftId, onUpdated }: EditShiftPricesModalProps) {
+    const [saving, setSaving] = useState(false);
+    const [seatTypes, setSeatTypes] = useState<Array<{ id: string; name: string }>>([]);
+    const [pricingByType, setPricingByType] = useState<Record<string, string>>({});
+    const [monthlyFee, setMonthlyFee] = useState('');
+
+    useEffect(() => {
+        if (!isOpen) return;
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        if (!token) return;
+
+        const controller = new AbortController();
+        Promise.all([
+            fetch(`${API_BASE_URL}/library/seat-types`, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal }),
+            fetch(`${API_BASE_URL}/library/shifts`, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal }),
+        ])
+            .then(async ([typesRes, shiftsRes]) => {
+                const typesBody = typesRes.ok ? await typesRes.json().catch(() => ([])) : [];
+                const shiftsBody = shiftsRes.ok ? await shiftsRes.json().catch(() => ([])) : [];
+                const types = Array.isArray(typesBody) ? typesBody : [];
+                const shifts = Array.isArray(shiftsBody) ? shiftsBody : [];
+
+                setSeatTypes(types);
+
+                const shift = shifts.find((s: any) => s?.id === shiftId);
+                const next: Record<string, string> = {};
+                for (const t of types) next[t.id] = '';
+
+                if (shift?.pricing && Array.isArray(shift.pricing)) {
+                    for (const row of shift.pricing) {
+                        if (row?.seat_type_id) next[row.seat_type_id] = String(row.monthly_fee ?? '');
+                    }
+                }
+                setPricingByType(next);
+                setMonthlyFee(shift?.monthly_fee != null ? String(shift.monthly_fee) : '');
+            })
+            .catch(() => {
+                setSeatTypes([]);
+                setPricingByType({});
+                setMonthlyFee('');
+            });
+
+        return () => controller.abort();
+    }, [isOpen, shiftId]);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        if (!token) {
+            alert('You are not logged in.');
+            return;
+        }
+
+        let payload: any = {};
+        if (seatTypes.length > 0) {
+            const rows: Array<{ seat_type_id: string; monthly_fee: number }> = [];
+            for (const t of seatTypes) {
+                const raw = (pricingByType[t.id] ?? '').trim();
+                const num = raw === '' ? NaN : Number(raw);
+                if (!Number.isFinite(num) || num < 0) {
+                    alert(`Please enter a valid monthly fee for ${t.name}`);
+                    return;
+                }
+                rows.push({ seat_type_id: t.id, monthly_fee: Math.trunc(num) });
+            }
+            payload = { pricing: rows };
+        } else {
+            const raw = monthlyFee.trim();
+            const num = raw === '' ? NaN : Number(raw);
+            if (!Number.isFinite(num) || num < 0) {
+                alert('Please enter a valid monthly fee');
+                return;
+            }
+            payload = { monthly_fee: Math.trunc(num) };
+        }
+
+        setSaving(true);
+        try {
+            const res = await fetch(`${API_BASE_URL}/library/shifts/${shiftId}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify(payload),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(body?.message || 'Failed to update shift prices');
+
+            onClose();
+            onUpdated?.();
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            alert(message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <BaseModal
+            isOpen={isOpen}
+            onClose={onClose}
+            title="Edit Shift Prices"
+            onSubmit={handleSubmit}
+            submitDisabled={saving}
+            submitLabel={saving ? 'Saving...' : 'Save'}
+        >
+            {seatTypes.length > 0 ? (
+                <div className={styles.inputGroup}>
+                    <label className={styles.label}>Monthly Fee by Seat Type (₹)</label>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                        {seatTypes.map((t) => (
+                            <div key={t.id} className={styles.inputGroup} style={{ marginBottom: 0 }}>
+                                <label className={styles.label}>{t.name}</label>
+                                <input
+                                    type="number"
+                                    className={styles.input}
+                                    placeholder="e.g. 500"
+                                    value={pricingByType[t.id] ?? ''}
+                                    onChange={(e) => setPricingByType((p) => ({ ...p, [t.id]: e.target.value }))}
+                                    min={0}
+                                />
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            ) : (
+                <div className={styles.inputGroup}>
+                    <label className={styles.label}>Monthly Fee (₹)</label>
+                    <input
+                        type="number"
+                        className={styles.input}
+                        placeholder="e.g. 500"
+                        value={monthlyFee}
+                        onChange={(e) => setMonthlyFee(e.target.value)}
+                        min={0}
+                    />
+                </div>
+            )}
+        </BaseModal>
+    );
+}
+
 interface CreateMembershipModalProps {
     isOpen: boolean;
     onClose: () => void;

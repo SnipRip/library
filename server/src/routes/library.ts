@@ -32,9 +32,29 @@ const CreateShiftSchema = z.object({
     .optional(),
 });
 
+const UpdateShiftSchema = z
+  .object({
+    monthly_fee: z.number().int().nonnegative().nullable().optional(),
+    pricing: z
+      .array(
+        z.object({
+          seat_type_id: z.string().uuid(),
+          monthly_fee: z.number().int().nonnegative(),
+        }),
+      )
+      .optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: "At least one field is required" });
+
 const CreateHallSchema = z.object({
   name: z.string().min(1),
 });
+
+const UpdateHallSchema = z
+  .object({
+    name: z.string().min(1).optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: "At least one field is required" });
 
 const CreateSeatTypeSchema = z.object({
   name: z.string().min(1),
@@ -163,6 +183,33 @@ export async function registerLibraryRoutes(app: FastifyInstance) {
     return reply.code(201).send(result.rows[0]);
   });
 
+  app.patch("/library/halls/:id", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const parsed = UpdateHallSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ message: "Invalid body", errors: parsed.error.issues });
+    }
+
+    const { id } = req.params as { id: string };
+    const pool = getPool();
+
+    const { name } = parsed.data;
+    const res = await pool.query(
+      `update library_halls
+       set name = coalesce($2, name),
+           updated_at = now()
+       where id = $1
+       returning id, name, created_at, updated_at`,
+      [id, name ?? null],
+    );
+
+    const row = res.rows[0];
+    if (!row) return reply.code(404).send({ message: "Hall not found" });
+    return reply.send(row);
+  });
+
   app.get("/library/shifts", async (req, reply) => {
     const auth = await requireAuth(req);
     if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
@@ -271,6 +318,150 @@ export async function registerLibraryRoutes(app: FastifyInstance) {
     } finally {
       client.release();
     }
+  });
+
+  app.patch("/library/shifts/:id", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const parsed = UpdateShiftSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ message: "Invalid body", errors: parsed.error.issues });
+    }
+
+    const { id } = req.params as { id: string };
+    const pool = getPool();
+    const { monthly_fee, pricing } = parsed.data;
+
+    const client = await pool.connect();
+    try {
+      await client.query("begin");
+
+      if (monthly_fee !== undefined) {
+        await client.query(
+          `update library_shifts
+           set monthly_fee = $2,
+               updated_at = now()
+           where id = $1`,
+          [id, monthly_fee],
+        );
+      }
+
+      if (pricing !== undefined) {
+        await client.query(`delete from library_shift_pricing where shift_id = $1`, [id]);
+        for (const row of pricing) {
+          await client.query(
+            `insert into library_shift_pricing (shift_id, seat_type_id, monthly_fee)
+             values ($1, $2, $3)
+             on conflict (shift_id, seat_type_id)
+             do update set monthly_fee = excluded.monthly_fee, updated_at = now()`,
+            [id, row.seat_type_id, row.monthly_fee],
+          );
+        }
+      }
+
+      const outRes = await client.query(
+        `select
+          s.id,
+          s.name,
+          s.start_time::text as start_time,
+          s.end_time::text as end_time,
+          s.monthly_fee,
+          s.created_at,
+          coalesce(
+            (
+              select json_agg(
+                json_build_object(
+                  'seat_type_id', p.seat_type_id,
+                  'seat_type_name', st.name,
+                  'monthly_fee', p.monthly_fee
+                )
+                order by st.name asc
+              )
+              from library_shift_pricing p
+              join library_seat_types st on st.id = p.seat_type_id
+              where p.shift_id = s.id
+            ),
+            '[]'::json
+          ) as pricing
+        from library_shifts s
+        where s.id = $1`,
+        [id],
+      );
+
+      await client.query("commit");
+
+      const row = outRes.rows[0];
+      if (!row) return reply.code(404).send({ message: "Shift not found" });
+      return reply.send(row);
+    } catch (err) {
+      await client.query("rollback");
+      throw err;
+    } finally {
+      client.release();
+    }
+  });
+
+  app.delete("/library/shifts/:id", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const { id } = req.params as { id: string };
+    const pool = getPool();
+
+    // Block deletion if shift has admissions or check-ins.
+    const membershipRes = await pool.query(
+      `select 1
+       from library_memberships m
+       where m.shift_id = $1
+       limit 1`,
+      [id],
+    );
+    if ((membershipRes.rows?.length ?? 0) > 0) {
+      return reply.code(409).send({ message: "Shift has admissions and cannot be deleted" });
+    }
+
+    const checkinsRes = await pool.query(
+      `select 1
+       from library_checkins c
+       where c.shift_id = $1
+       limit 1`,
+      [id],
+    );
+    if ((checkinsRes.rows?.length ?? 0) > 0) {
+      return reply.code(409).send({ message: "Shift has check-ins and cannot be deleted" });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query("begin");
+      await client.query(`delete from library_shift_pricing where shift_id = $1`, [id]);
+      const res = await client.query(`delete from library_shifts where id = $1 returning id`, [id]);
+      if (res.rowCount === 0) {
+        await client.query("rollback");
+        return reply.code(404).send({ message: "Shift not found" });
+      }
+      await client.query("commit");
+      return reply.send({ ok: true });
+    } catch (err: unknown) {
+      await client.query("rollback");
+      const message = err instanceof Error ? err.message : "Failed to delete shift";
+      return reply.code(409).send({ message });
+    } finally {
+      client.release();
+    }
+  });
+
+  app.delete("/library/halls/:id", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const { id } = req.params as { id: string };
+    const pool = getPool();
+
+    const res = await pool.query(`delete from library_halls where id = $1 returning id`, [id]);
+    if (res.rowCount === 0) return reply.code(404).send({ message: "Hall not found" });
+    return reply.send({ ok: true });
   });
 
   app.get("/library/seats", async (req, reply) => {
@@ -416,6 +607,71 @@ export async function registerLibraryRoutes(app: FastifyInstance) {
     );
 
     return reply.code(201).send(result.rows[0]);
+  });
+
+  app.delete("/library/seats/:id", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const { id } = req.params as { id: string };
+    const pool = getPool();
+
+    // Block deletion if seat is reserved by any active membership (current or future).
+    const reservedRes = await pool.query(
+      `select 1
+       from library_memberships m
+       where m.reserved_seat_id = $1
+         and m.status = 'active'
+         and (m.end_date is null or m.end_date >= current_date)
+       limit 1`,
+      [id],
+    );
+    if ((reservedRes.rows?.length ?? 0) > 0) {
+      return reply.code(409).send({ message: "Seat is reserved and cannot be deleted" });
+    }
+
+    // Block deletion if seat is currently assigned via an active check-in.
+    const activeCheckinRes = await pool.query(
+      `select 1
+       from library_checkins c
+       where c.seat_id = $1
+         and now() >= c.start_at
+         and now() < c.end_at
+       limit 1`,
+      [id],
+    );
+    if ((activeCheckinRes.rows?.length ?? 0) > 0) {
+      return reply.code(409).send({ message: "Seat is currently occupied and cannot be deleted" });
+    }
+
+    // Backward-compat safety: if legacy occupant fields show occupancy, block.
+    const legacySeatRes = await pool.query(
+      `select status, occupant_student_id, occupied_until
+       from library_seats
+       where id = $1
+       limit 1`,
+      [id],
+    );
+    const legacySeat = legacySeatRes.rows[0] as
+      | { status: string; occupant_student_id: string | null; occupied_until: string | null }
+      | undefined;
+    if (!legacySeat) return reply.code(404).send({ message: "Seat not found" });
+    if (
+      legacySeat.status === "occupied" ||
+      (legacySeat.occupant_student_id && (!legacySeat.occupied_until || new Date(legacySeat.occupied_until).getTime() > Date.now()))
+    ) {
+      return reply.code(409).send({ message: "Seat is currently occupied and cannot be deleted" });
+    }
+
+    try {
+      const res = await pool.query(`delete from library_seats where id = $1 returning id`, [id]);
+      if (res.rowCount === 0) return reply.code(404).send({ message: "Seat not found" });
+      return reply.send({ ok: true });
+    } catch (err: unknown) {
+      // Most common: foreign key restriction from library_checkins(seat_id) on delete restrict.
+      const message = err instanceof Error ? err.message : "Failed to delete seat";
+      return reply.code(409).send({ message });
+    }
   });
 
   app.patch("/library/seats/:id", async (req, reply) => {
