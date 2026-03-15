@@ -19,6 +19,8 @@ export default function Sidebar() {
         return false;
     };
 
+    const isActiveExact = (path: string) => pathname === path;
+
     return (
         <aside className={styles.sidebar}>
             <div className={styles.headerGroup}>
@@ -62,11 +64,19 @@ export default function Sidebar() {
                     </li>
                 )}
                 <li className={styles.menuItem}>
-                    <Link href="/library" className={`${styles.menuLink} ${isActive('/library') ? styles.menuLinkActive : ''}`}>
+                    <Link href="/library" className={`${styles.menuLink} ${isActiveExact('/library') ? styles.menuLinkActive : ''}`}>
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className={styles.icon}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
                         </svg>
                         Library
+                    </Link>
+                </li>
+                <li className={styles.menuItem}>
+                    <Link href="/library/lockers" className={`${styles.menuLink} ${isActive('/library/lockers') ? styles.menuLinkActive : ''}`}>
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className={styles.icon}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M7 7V6a2 2 0 012-2h6a2 2 0 012 2v1m-10 0h10m-10 0V20a2 2 0 002 2h6a2 2 0 002-2V7M9 11h6m-6 4h6" />
+                        </svg>
+                        Lockers
                     </Link>
                 </li>
                 {brandConfig.modules.items && (

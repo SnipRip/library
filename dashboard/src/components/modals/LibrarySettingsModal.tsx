@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import modalStyles from "./Modal.module.css";
 
-type SettingsTab = "seats" | "halls" | "shifts" | "admissions";
+type SettingsTab = "seats" | "halls" | "shifts";
 
 export interface HallRow {
   id: string;
@@ -56,8 +56,6 @@ export interface LibrarySettingsModalProps {
   onOpenAddShift: () => void;
   onEditShiftPrices: (shiftId: string) => void;
   onDeleteShift: (shiftId: string) => void;
-
-  onOpenAddAdmission: () => void;
 }
 
 function TabButton({
@@ -138,7 +136,6 @@ export default function LibrarySettingsModal({
   onOpenAddShift,
   onEditShiftPrices,
   onDeleteShift,
-  onOpenAddAdmission,
 }: LibrarySettingsModalProps) {
   const [tab, setTab] = useState<SettingsTab>("seats");
 
@@ -149,7 +146,6 @@ export default function LibrarySettingsModal({
       { key: "seats" as const, label: "Seats" },
       { key: "halls" as const, label: "Halls" },
       { key: "shifts" as const, label: "Shifts" },
-      { key: "admissions" as const, label: "Admissions" },
     ],
     [],
   );
@@ -382,11 +378,6 @@ export default function LibrarySettingsModal({
             </div>
           ) : null}
 
-          {tab === "admissions" ? (
-            <div style={{ display: "grid", gap: "0.75rem" }}>
-              <ActionButton label="Add Admission" onClick={() => open(onOpenAddAdmission)} />
-            </div>
-          ) : null}
         </div>
 
         <div className={modalStyles.footer}>

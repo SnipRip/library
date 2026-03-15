@@ -294,3 +294,51 @@ where s.hall_id is null
   and s.hall is not null
   and trim(s.hall) <> ''
   and trim(s.hall) = h.name;
+
+-- Library lockers (minimal)
+-- Assumptions:
+-- - Lockers are numbered 1..total_lockers
+-- - One active locker per student, and one active student per locker
+
+create table if not exists library_locker_settings (
+  id uuid primary key default gen_random_uuid(),
+  total_lockers integer not null default 0 check (total_lockers >= 0),
+  monthly_fee integer not null default 0 check (monthly_fee >= 0),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- Ensure a single settings row exists (safe for re-runs)
+insert into library_locker_settings (total_lockers, monthly_fee)
+select 0, 0
+where not exists (select 1 from library_locker_settings);
+
+create table if not exists library_locker_assignments (
+  id uuid primary key default gen_random_uuid(),
+  locker_number integer not null check (locker_number > 0),
+  student_id uuid not null references students(id) on delete cascade,
+  start_date date not null default current_date,
+  end_date date null,
+  status text not null default 'active',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table library_locker_assignments add column if not exists locker_number integer;
+alter table library_locker_assignments add column if not exists student_id uuid;
+alter table library_locker_assignments add column if not exists start_date date;
+alter table library_locker_assignments add column if not exists end_date date;
+alter table library_locker_assignments add column if not exists status text;
+
+create index if not exists idx_library_locker_assignments_student_id on library_locker_assignments (student_id);
+create index if not exists idx_library_locker_assignments_locker_number on library_locker_assignments (locker_number);
+create index if not exists idx_library_locker_assignments_status on library_locker_assignments (status);
+
+-- One active locker per student (end_date null) and one active student per locker.
+create unique index if not exists ux_library_locker_assignments_active_student
+  on library_locker_assignments (student_id)
+  where status = 'active' and end_date is null;
+
+create unique index if not exists ux_library_locker_assignments_active_locker
+  on library_locker_assignments (locker_number)
+  where status = 'active' and end_date is null;

@@ -113,6 +113,7 @@ async function loadSeatTypes(setSeatTypes: React.Dispatch<React.SetStateAction<S
   }
 }
 
+
 export default function LibraryPage() {
   const [activeShiftId, setActiveShiftId] = useState<string | null>(null);
   const [shifts, setShifts] = useState<Shift[]>([]);
@@ -315,7 +316,7 @@ export default function LibraryPage() {
 
   return (
     <>
-      <TopNav title="Library Management" />
+      <TopNav title="Library Management" onSettingsClick={() => setIsLibrarySettingsOpen(true)} />
 
       <div style={{ padding: '1.5rem', height: '100%', overflowY: 'auto' }}>
         <div className={styles.header}>
@@ -430,11 +431,6 @@ export default function LibraryPage() {
           onOpenAddShift={() => setIsShiftModalOpen(true)}
           onEditShiftPrices={(shiftId) => openEditShiftPrices(shiftId)}
           onDeleteShift={(shiftId) => void deleteShift(shiftId)}
-          onOpenAddAdmission={() => {
-            setMembershipDefaultSeatTypeId(null);
-            setMembershipDefaultReservedSeatId(null);
-            setIsMembershipModalOpen(true);
-          }}
         />
 
         <CreateMembershipModal
@@ -462,10 +458,6 @@ export default function LibraryPage() {
             <div className={styles.mapHeader}>
               <div className={styles.roomHeaderLeft}>
                 {hallLabel ? <h3 style={{ fontSize: '1.1rem', fontWeight: 600 }}>{hallLabel}</h3> : null}
-
-                <button className={styles.roomToolbarBtn} onClick={() => setIsLibrarySettingsOpen(true)}>
-                  Settings
-                </button>
               </div>
 
               <div className={styles.legend}>

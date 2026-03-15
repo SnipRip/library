@@ -75,6 +75,17 @@ const CreateCheckinSchema = z.object({
   seat_id: z.string().uuid(),
 });
 
+const UpdateLockerSettingsSchema = z.object({
+  total_lockers: z.number().int().nonnegative(),
+  monthly_fee: z.number().int().nonnegative(),
+});
+
+const CreateLockerAssignmentSchema = z.object({
+  locker_number: z.number().int().positive(),
+  student_id: z.string().uuid(),
+  start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+
 const VacateSeatSchema = z.object({
   checkin_id: z.string().uuid().optional(),
 });
@@ -976,5 +987,204 @@ export async function registerLibraryRoutes(app: FastifyInstance) {
       const msg = err instanceof Error ? err.message : "Check-in failed";
       return reply.code(409).send({ message: msg });
     }
+  });
+
+  app.get("/library/lockers/settings", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const pool = getPool();
+    const res = await pool.query(
+      `select total_lockers, monthly_fee, updated_at
+       from library_locker_settings
+       order by created_at asc
+       limit 1`,
+    );
+
+    const row = res.rows[0] as
+      | { total_lockers: number; monthly_fee: number; updated_at: string }
+      | undefined;
+    return reply.send(row ?? { total_lockers: 0, monthly_fee: 0, updated_at: null });
+  });
+
+  app.put("/library/lockers/settings", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const parsed = UpdateLockerSettingsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ message: "Invalid body", errors: parsed.error.issues });
+    }
+
+    const pool = getPool();
+    const { total_lockers, monthly_fee } = parsed.data;
+
+    const maxAssignedRes = await pool.query(
+      `select coalesce(max(locker_number), 0) as max_locker_number
+       from library_locker_assignments
+       where status = 'active' and end_date is null`,
+    );
+    const maxAssigned = Number(maxAssignedRes.rows[0]?.max_locker_number ?? 0);
+    if (total_lockers < maxAssigned) {
+      return reply
+        .code(409)
+        .send({ message: `Total lockers cannot be less than ${maxAssigned} (an active assignment exists)` });
+    }
+
+    const updateRes = await pool.query(
+      `update library_locker_settings
+       set total_lockers = $1,
+           monthly_fee = $2,
+           updated_at = now()
+       returning total_lockers, monthly_fee, updated_at`,
+      [total_lockers, monthly_fee],
+    );
+
+    if (updateRes.rows[0]) return reply.send(updateRes.rows[0]);
+
+    const insertRes = await pool.query(
+      `insert into library_locker_settings (total_lockers, monthly_fee)
+       values ($1, $2)
+       returning total_lockers, monthly_fee, updated_at`,
+      [total_lockers, monthly_fee],
+    );
+    return reply.send(insertRes.rows[0]);
+  });
+
+  app.get("/library/lockers", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const pool = getPool();
+
+    const settingsRes = await pool.query(
+      `select total_lockers
+       from library_locker_settings
+       order by created_at asc
+       limit 1`,
+    );
+    const totalLockers = Number(settingsRes.rows[0]?.total_lockers ?? 0);
+    if (!Number.isFinite(totalLockers) || totalLockers <= 0) return reply.send([]);
+
+    const res = await pool.query(
+      `with active as (
+        select a.id as assignment_id, a.locker_number, a.student_id, a.start_date
+        from library_locker_assignments a
+        where a.status = 'active' and a.end_date is null
+      )
+      select
+        gs as locker_number,
+        a.assignment_id,
+        a.student_id,
+        st.full_name as student_name,
+        a.start_date
+      from generate_series(1, $1::int) gs
+      left join active a on a.locker_number = gs
+      left join students st on st.id = a.student_id
+      order by gs asc`,
+      [totalLockers],
+    );
+
+    return reply.send(res.rows);
+  });
+
+  app.get("/library/lockers/assignments", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const { active } = req.query as { active?: string };
+    const pool = getPool();
+
+    const where = active === "false" ? "" : "where a.status = 'active' and a.end_date is null";
+    const res = await pool.query(
+      `select
+        a.id,
+        a.locker_number,
+        a.student_id,
+        st.full_name as student_name,
+        a.start_date,
+        a.end_date,
+        a.status,
+        a.created_at
+      from library_locker_assignments a
+      join students st on st.id = a.student_id
+      ${where}
+      order by a.locker_number asc, a.created_at desc`,
+    );
+
+    return reply.send(res.rows);
+  });
+
+  app.post("/library/lockers/assignments", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const parsed = CreateLockerAssignmentSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ message: "Invalid body", errors: parsed.error.issues });
+    }
+
+    const pool = getPool();
+    const { locker_number, student_id, start_date } = parsed.data;
+
+    const settingsRes = await pool.query(
+      `select total_lockers
+       from library_locker_settings
+       order by created_at asc
+       limit 1`,
+    );
+    const totalLockers = Number(settingsRes.rows[0]?.total_lockers ?? 0);
+    if (locker_number > totalLockers) {
+      return reply
+        .code(400)
+        .send({ message: `Locker number must be between 1 and ${Math.max(0, totalLockers)}` });
+    }
+
+    // Validate student exists
+    const studentRes = await pool.query(
+      `select id
+       from students
+       where id = $1
+       limit 1`,
+      [student_id],
+    );
+    if (!studentRes.rows[0]) return reply.code(404).send({ message: "Student not found" });
+
+    try {
+      const res = await pool.query(
+        `insert into library_locker_assignments (locker_number, student_id, start_date)
+         values ($1, $2, coalesce($3::date, current_date))
+         returning id, locker_number, student_id, start_date, end_date, status, created_at`,
+        [locker_number, student_id, start_date ?? null],
+      );
+      return reply.code(201).send(res.rows[0]);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to assign locker";
+      return reply.code(409).send({ message: msg });
+    }
+  });
+
+  app.patch("/library/lockers/assignments/:id/end", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const { id } = req.params as { id: string };
+    const pool = getPool();
+
+    const res = await pool.query(
+      `update library_locker_assignments
+       set end_date = current_date,
+           status = 'ended',
+           updated_at = now()
+       where id = $1
+         and status = 'active'
+         and end_date is null
+       returning id, locker_number, student_id, start_date, end_date, status, updated_at`,
+      [id],
+    );
+
+    const row = res.rows[0];
+    if (!row) return reply.code(404).send({ message: "Active assignment not found" });
+    return reply.send(row);
   });
 }
