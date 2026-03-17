@@ -145,6 +145,34 @@
     align-items: center;
 }
 
+.chevron {
+    color: #64748b;
+    font-weight: 700;
+}
+
+.serial {
+    color: #64748b;
+    font-weight: 700;
+    margin-right: 0.25rem;
+}
+
+.linkButton {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.375rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-decoration: none;
+    border: 1px solid #e2e8f0;
+    background: white;
+    color: #334155;
+}
+
+.linkButton:hover {
+    background: #f8fafc;
+}
+
 .topicList {
     padding: 1rem;
     background: white;
@@ -186,4 +214,54 @@
 
 .addButton:hover {
     background-color: #2563eb;
+}
+
+.rowActions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.iconButton {
+    border: 1px solid #e2e8f0;
+    background: white;
+    color: #334155;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.5rem;
+    font-weight: 900;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.iconButtonDanger {
+    border-color: #fecaca;
+    background: #fff1f2;
+    color: #b91c1c;
+}
+
+.iconButtonDanger:hover {
+    background: #ffe4e6;
+}
+
+.iconButton:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.dangerButton {
+    border: 1px solid #fecaca;
+    background: #fff1f2;
+    color: #b91c1c;
+    padding: 0.45rem 0.75rem;
+    border-radius: 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.dangerButton:hover {
+    background: #ffe4e6;
 }

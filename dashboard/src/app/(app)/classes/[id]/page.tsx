@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
 import TopNav from '@/components/TopNav';
 import styles from './details.module.css';
 import { API_BASE_URL } from '@/lib/api';
@@ -60,6 +61,8 @@ type TopicRow = {
     id: string;
     subject_id: string;
     name: string;
+    is_completed?: boolean;
+    position?: number;
     created_at?: string;
     updated_at?: string;
 };
@@ -68,9 +71,21 @@ type TopicPartRow = {
     id: string;
     topic_id: string;
     name: string;
+    is_completed?: boolean;
+    position?: number;
     created_at?: string;
     updated_at?: string;
 };
+
+function moveItem<T>(arr: T[], from: number, to: number): T[] {
+    if (from === to) return arr;
+    if (from < 0 || from >= arr.length) return arr;
+    if (to < 0 || to >= arr.length) return arr;
+    const copy = [...arr];
+    const [item] = copy.splice(from, 1);
+    copy.splice(to, 0, item);
+    return copy;
+}
 
 function apiErrorMessage(body: unknown, fallback: string): string {
     if (body && typeof body === 'object') {
@@ -212,6 +227,8 @@ export default function ClassDetailsPage() {
     const [creatingTopic, setCreatingTopic] = useState(false);
     const [creatingSubpart, setCreatingSubpart] = useState(false);
 
+    const [togglingId, setTogglingId] = useState<string | null>(null);
+
     const classId = typeof params?.id === 'string' ? params.id : undefined;
 
     const effectiveRow =
@@ -341,6 +358,37 @@ export default function ClassDetailsPage() {
         }
     };
 
+    const toggleTopicCompleted = async (topic: TopicRow, isCompleted: boolean) => {
+        if (!classId) return;
+        const token = localStorage.getItem('token');
+        if (!token) return;
+        setTogglingId(topic.id);
+        try {
+            const res = await fetch(`${API_BASE_URL}/classes/${classId}/topics/${topic.id}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ is_completed: isCompleted }),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(apiErrorMessage(body, 'Failed to update chapter'));
+
+            setTopicsBySubject((prev) => {
+                const list = prev[topic.subject_id] ?? [];
+                return {
+                    ...prev,
+                    [topic.subject_id]: list.map((t) => (t.id === topic.id ? { ...t, is_completed: isCompleted } : t)),
+                };
+            });
+        } catch (err: unknown) {
+            alert(err instanceof Error ? err.message : String(err));
+        } finally {
+            setTogglingId(null);
+        }
+    };
+
     const handleAddSubpart = async (name: string) => {
         if (!classId) return;
         if (!activeTopicForAdd) return;
@@ -370,6 +418,142 @@ export default function ClassDetailsPage() {
             alert(err instanceof Error ? err.message : String(err));
         } finally {
             setCreatingSubpart(false);
+        }
+    };
+
+    const togglePartCompleted = async (part: TopicPartRow, isCompleted: boolean) => {
+        if (!classId) return;
+        const token = localStorage.getItem('token');
+        if (!token) return;
+        setTogglingId(part.id);
+        try {
+            const res = await fetch(`${API_BASE_URL}/classes/${classId}/parts/${part.id}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ is_completed: isCompleted }),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(apiErrorMessage(body, 'Failed to update subpart'));
+
+            setTopicPartsByTopic((prev) => {
+                const list = prev[part.topic_id] ?? [];
+                return {
+                    ...prev,
+                    [part.topic_id]: list.map((p) => (p.id === part.id ? { ...p, is_completed: isCompleted } : p)),
+                };
+            });
+        } catch (err: unknown) {
+            alert(err instanceof Error ? err.message : String(err));
+        } finally {
+            setTogglingId(null);
+        }
+    };
+
+    const reorderTopics = async (subjectId: string, next: TopicRow[]) => {
+        if (!classId) return;
+        const token = localStorage.getItem('token');
+        if (!token) return;
+
+        setTopicsBySubject((p) => ({ ...p, [subjectId]: next }));
+        try {
+            const res = await fetch(`${API_BASE_URL}/classes/${classId}/subjects/${subjectId}/topics/reorder`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ ids: next.map((t) => t.id) }),
+            });
+            const body = await res.json().catch(() => null);
+            if (!res.ok) throw new Error(apiErrorMessage(body, 'Failed to reorder chapters'));
+            if (Array.isArray(body)) setTopicsBySubject((p) => ({ ...p, [subjectId]: body as TopicRow[] }));
+        } catch (err: unknown) {
+            alert(err instanceof Error ? err.message : String(err));
+            const controller = new AbortController();
+            const fresh = await loadTopicsBySubjectId(classId, subjectId, controller.signal).catch(() => []);
+            setTopicsBySubject((p) => ({ ...p, [subjectId]: fresh }));
+        }
+    };
+
+    const removeTopic = async (topic: TopicRow) => {
+        if (!classId) return;
+        if (!confirm(`Remove chapter "${topic.name}"?`)) return;
+        const token = localStorage.getItem('token');
+        if (!token) return;
+
+        try {
+            const res = await fetch(`${API_BASE_URL}/classes/${classId}/topics/${topic.id}`, {
+                method: 'DELETE',
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok && res.status !== 204) {
+                const body = await res.json().catch(() => null);
+                throw new Error(apiErrorMessage(body, 'Failed to remove chapter'));
+            }
+            setTopicsBySubject((p) => ({
+                ...p,
+                [topic.subject_id]: (p[topic.subject_id] ?? []).filter((t) => t.id !== topic.id),
+            }));
+            setTopicPartsByTopic((p) => {
+                const next = { ...p };
+                delete next[topic.id];
+                return next;
+            });
+        } catch (err: unknown) {
+            alert(err instanceof Error ? err.message : String(err));
+        }
+    };
+
+    const reorderParts = async (topicId: string, next: TopicPartRow[]) => {
+        if (!classId) return;
+        const token = localStorage.getItem('token');
+        if (!token) return;
+
+        setTopicPartsByTopic((p) => ({ ...p, [topicId]: next }));
+        try {
+            const res = await fetch(`${API_BASE_URL}/classes/${classId}/topics/${topicId}/parts/reorder`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ ids: next.map((x) => x.id) }),
+            });
+            const body = await res.json().catch(() => null);
+            if (!res.ok) throw new Error(apiErrorMessage(body, 'Failed to reorder subparts'));
+            if (Array.isArray(body)) setTopicPartsByTopic((p) => ({ ...p, [topicId]: body as TopicPartRow[] }));
+        } catch (err: unknown) {
+            alert(err instanceof Error ? err.message : String(err));
+            const controller = new AbortController();
+            const fresh = await loadPartsByTopicId(classId, topicId, controller.signal).catch(() => []);
+            setTopicPartsByTopic((p) => ({ ...p, [topicId]: fresh }));
+        }
+    };
+
+    const removePart = async (part: TopicPartRow) => {
+        if (!classId) return;
+        if (!confirm(`Remove subpart "${part.name}"?`)) return;
+        const token = localStorage.getItem('token');
+        if (!token) return;
+
+        try {
+            const res = await fetch(`${API_BASE_URL}/classes/${classId}/parts/${part.id}`, {
+                method: 'DELETE',
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok && res.status !== 204) {
+                const body = await res.json().catch(() => null);
+                throw new Error(apiErrorMessage(body, 'Failed to remove subpart'));
+            }
+            setTopicPartsByTopic((p) => ({
+                ...p,
+                [part.topic_id]: (p[part.topic_id] ?? []).filter((x) => x.id !== part.id),
+            }));
+        } catch (err: unknown) {
+            alert(err instanceof Error ? err.message : String(err));
         }
     };
 
@@ -562,8 +746,19 @@ export default function ClassDetailsPage() {
                                     {subjects.map((s) => (
                                         <div key={s.id} className={styles.subjectAccordion}>
                                             <div className={styles.subjectHeader} onClick={() => void toggleSubject(s)}>
-                                                <span>{s.name}</span>
-                                                <span>{openSubjectId === s.id ? '−' : '+'}</span>
+                                                <span style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                                    <span>{s.name}</span>
+                                                    {classId ? (
+                                                        <Link
+                                                            href={`/classes/${classId}/subjects/${s.id}`}
+                                                            onClick={(e) => e.stopPropagation()}
+                                                            className={styles.linkButton}
+                                                        >
+                                                            Materials
+                                                        </Link>
+                                                    ) : null}
+                                                </span>
+                                                <span className={styles.chevron}>{openSubjectId === s.id ? '▾' : '▸'}</span>
                                             </div>
 
                                             {openSubjectId === s.id ? (
@@ -587,31 +782,81 @@ export default function ClassDetailsPage() {
                                                         <p style={{ lineHeight: 1.6, margin: 0 }}>No chapters yet.</p>
                                                     ) : (
                                                         <div>
-                                                            {(topicsBySubject[s.id] ?? []).map((t) => (
+                                                            {(topicsBySubject[s.id] ?? []).map((t, idx) => (
                                                                 <div key={t.id} style={{ marginBottom: '0.75rem' }}>
-                                                                    <div
-                                                                        className={styles.topicItem}
-                                                                        style={{ justifyContent: 'space-between' }}
-                                                                    >
-                                                                        <div
-                                                                            className={styles.fieldValue}
-                                                                            style={{ cursor: 'pointer' }}
-                                                                            onClick={() => void toggleTopic(t)}
-                                                                        >
-                                                                            {t.name}
+                                                                    <div className={styles.topicItem} style={{ justifyContent: 'space-between' }}>
+                                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: 1 }}>
+                                                                            <input
+                                                                                type="checkbox"
+                                                                                className={styles.checkbox}
+                                                                                checked={Boolean(t.is_completed)}
+                                                                                disabled={togglingId === t.id}
+                                                                                onChange={(e) => void toggleTopicCompleted(t, e.target.checked)}
+                                                                                onClick={(e) => e.stopPropagation()}
+                                                                                aria-label={`Mark chapter ${t.name} as completed`}
+                                                                            />
+                                                                            <div
+                                                                                className={styles.fieldValue}
+                                                                                style={{ cursor: 'pointer', margin: 0, flex: 1 }}
+                                                                                onClick={() => void toggleTopic(t)}
+                                                                            >
+                                                                                <span className={styles.serial}>{idx + 1}.</span>{' '}
+                                                                                <span className={t.is_completed ? styles.completed : undefined}>{t.name}</span>
+                                                                            </div>
                                                                         </div>
 
-                                                                        <button
-                                                                            type="button"
-                                                                            className={styles.addButton}
-                                                                            onClick={() => {
-                                                                                setActiveTopicForAdd(t);
-                                                                                setIsAddSubpartOpen(true);
-                                                                            }}
-                                                                            disabled={creatingSubpart}
-                                                                        >
-                                                                            {creatingSubpart ? 'Adding…' : 'Add Subpart'}
-                                                                        </button>
+                                                                        <div className={styles.rowActions}>
+                                                                            <button
+                                                                                type="button"
+                                                                                className={styles.iconButton}
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    const list = topicsBySubject[s.id] ?? [];
+                                                                                    void reorderTopics(s.id, moveItem(list, idx, idx - 1));
+                                                                                }}
+                                                                                disabled={idx === 0}
+                                                                                aria-label="Move chapter up"
+                                                                            >
+                                                                                ↑
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                className={styles.iconButton}
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    const list = topicsBySubject[s.id] ?? [];
+                                                                                    void reorderTopics(s.id, moveItem(list, idx, idx + 1));
+                                                                                }}
+                                                                                disabled={idx === (topicsBySubject[s.id] ?? []).length - 1}
+                                                                                aria-label="Move chapter down"
+                                                                            >
+                                                                                ↓
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                className={`${styles.iconButton} ${styles.iconButtonDanger}`}
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    void removeTopic(t);
+                                                                                }}
+                                                                                aria-label="Remove chapter"
+                                                                            >
+                                                                                ✕
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                className={styles.addButton}
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    setOpenTopicId(t.id);
+                                                                                    setActiveTopicForAdd(t);
+                                                                                    setIsAddSubpartOpen(true);
+                                                                                }}
+                                                                                disabled={creatingSubpart}
+                                                                            >
+                                                                                {creatingSubpart ? 'Adding…' : 'Add Subpart'}
+                                                                            </button>
+                                                                        </div>
                                                                     </div>
 
                                                                     {openTopicId === t.id ? (
@@ -622,9 +867,57 @@ export default function ClassDetailsPage() {
                                                                                 <p style={{ lineHeight: 1.6, margin: 0 }}>No subparts yet.</p>
                                                                             ) : (
                                                                                 <div>
-                                                                                    {(topicPartsByTopic[t.id] ?? []).map((p) => (
-                                                                                        <div key={p.id} className={styles.topicItem}>
-                                                                                            <span>{p.name}</span>
+                                                                                    {(topicPartsByTopic[t.id] ?? []).map((p, pIdx) => (
+                                                                                        <div key={p.id} className={styles.topicItem} style={{ justifyContent: 'space-between' }}>
+                                                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: 1 }}>
+                                                                                                <input
+                                                                                                    type="checkbox"
+                                                                                                    className={styles.checkbox}
+                                                                                                    checked={Boolean(p.is_completed)}
+                                                                                                    disabled={togglingId === p.id}
+                                                                                                    onChange={(e) => void togglePartCompleted(p, e.target.checked)}
+                                                                                                    aria-label={`Mark subpart ${p.name} as completed`}
+                                                                                                />
+                                                                                                <span>
+                                                                                                    <span className={styles.serial}>{idx + 1}.{pIdx + 1}</span>{' '}
+                                                                                                    <span className={p.is_completed ? styles.completed : undefined}>{p.name}</span>
+                                                                                                </span>
+                                                                                            </div>
+
+                                                                                            <div className={styles.rowActions}>
+                                                                                                <button
+                                                                                                    type="button"
+                                                                                                    className={styles.iconButton}
+                                                                                                    onClick={() => {
+                                                                                                        const list = topicPartsByTopic[t.id] ?? [];
+                                                                                                        void reorderParts(t.id, moveItem(list, pIdx, pIdx - 1));
+                                                                                                    }}
+                                                                                                    disabled={pIdx === 0}
+                                                                                                    aria-label="Move subpart up"
+                                                                                                >
+                                                                                                    ↑
+                                                                                                </button>
+                                                                                                <button
+                                                                                                    type="button"
+                                                                                                    className={styles.iconButton}
+                                                                                                    onClick={() => {
+                                                                                                        const list = topicPartsByTopic[t.id] ?? [];
+                                                                                                        void reorderParts(t.id, moveItem(list, pIdx, pIdx + 1));
+                                                                                                    }}
+                                                                                                    disabled={pIdx === (topicPartsByTopic[t.id] ?? []).length - 1}
+                                                                                                    aria-label="Move subpart down"
+                                                                                                >
+                                                                                                    ↓
+                                                                                                </button>
+                                                                                                <button
+                                                                                                    type="button"
+                                                                                                    className={`${styles.iconButton} ${styles.iconButtonDanger}`}
+                                                                                                    onClick={() => void removePart(p)}
+                                                                                                    aria-label="Remove subpart"
+                                                                                                >
+                                                                                                    ✕
+                                                                                                </button>
+                                                                                            </div>
                                                                                         </div>
                                                                                     ))}
                                                                                 </div>

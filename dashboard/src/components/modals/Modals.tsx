@@ -2439,3 +2439,81 @@ export function AddSubpartModal({ isOpen, onClose, onAdd, topicName }: AddSubpar
         </BaseModal>
     );
 }
+
+interface AddSubjectMaterialModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+    onAdd: (data: { title: string; url: string; description?: string; thumbnailUrl?: string }) => void;
+}
+
+export function AddSubjectMaterialModal({ isOpen, onClose, onAdd }: AddSubjectMaterialModalProps) {
+    const [title, setTitle] = useState('');
+    const [url, setUrl] = useState('');
+    const [description, setDescription] = useState('');
+    const [thumbnailUrl, setThumbnailUrl] = useState('');
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        onAdd({
+            title,
+            url,
+            description: description.trim() ? description : undefined,
+            thumbnailUrl: thumbnailUrl.trim() ? thumbnailUrl : undefined,
+        });
+        setTitle('');
+        setUrl('');
+        setDescription('');
+        setThumbnailUrl('');
+        onClose();
+    };
+
+    return (
+        <BaseModal isOpen={isOpen} onClose={onClose} title="Add Subject Material" onSubmit={handleSubmit}>
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Title</label>
+                <input
+                    type="text"
+                    className={styles.input}
+                    placeholder="e.g. Chapter 1 Notes PDF"
+                    required
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                />
+            </div>
+
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>PDF / Link URL</label>
+                <input
+                    type="url"
+                    className={styles.input}
+                    placeholder="https://..."
+                    required
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                />
+            </div>
+
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Description (optional)</label>
+                <textarea
+                    className={styles.textarea}
+                    placeholder="What is this material for?"
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    rows={3}
+                />
+            </div>
+
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Thumbnail URL (optional)</label>
+                <input
+                    type="url"
+                    className={styles.input}
+                    placeholder="https://.../thumb.png"
+                    value={thumbnailUrl}
+                    onChange={(e) => setThumbnailUrl(e.target.value)}
+                />
+            </div>
+        </BaseModal>
+    );
+}

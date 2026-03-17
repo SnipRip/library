@@ -140,6 +140,8 @@ create table if not exists class_subject_topics (
   id uuid primary key default gen_random_uuid(),
   subject_id uuid not null references class_subjects(id) on delete cascade,
   name text not null,
+  is_completed boolean not null default false,
+  position integer not null default 0,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (subject_id, name)
@@ -147,17 +149,39 @@ create table if not exists class_subject_topics (
 
 create index if not exists idx_class_subject_topics_subject_id on class_subject_topics (subject_id);
 
+alter table class_subject_topics add column if not exists is_completed boolean not null default false;
+alter table class_subject_topics add column if not exists position integer not null default 0;
+
 -- Topic parts / subparts
 create table if not exists class_topic_parts (
   id uuid primary key default gen_random_uuid(),
   topic_id uuid not null references class_subject_topics(id) on delete cascade,
   name text not null,
+  is_completed boolean not null default false,
+  position integer not null default 0,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (topic_id, name)
 );
 
 create index if not exists idx_class_topic_parts_topic_id on class_topic_parts (topic_id);
+
+alter table class_topic_parts add column if not exists is_completed boolean not null default false;
+alter table class_topic_parts add column if not exists position integer not null default 0;
+
+-- Subject materials (store external links + metadata, eg. PDF reference links)
+create table if not exists class_subject_materials (
+  id uuid primary key default gen_random_uuid(),
+  subject_id uuid not null references class_subjects(id) on delete cascade,
+  title text not null,
+  description text null,
+  url text not null,
+  thumbnail_url text null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_class_subject_materials_subject_id on class_subject_materials (subject_id);
 
 -- Documents (planned; stores metadata for anything uploaded under Uploads/)
 create table if not exists class_documents (

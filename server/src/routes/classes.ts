@@ -101,6 +101,21 @@ const CreateTopicPartSchema = z.object({
   name: z.string().min(1).max(160),
 });
 
+const ToggleCompletedSchema = z.object({
+  is_completed: z.boolean(),
+});
+
+const CreateMaterialSchema = z.object({
+  title: z.string().min(1).max(200),
+  url: z.string().url(),
+  description: z.string().max(2000).optional().nullable(),
+  thumbnail_url: z.string().url().optional().nullable(),
+});
+
+const ReorderIdsSchema = z.object({
+  ids: z.array(z.string().min(1)).min(1),
+});
+
 function slugify(input: string): string {
   const s = input
     .toLowerCase()
@@ -227,6 +242,26 @@ export async function registerClassRoutes(app: FastifyInstance) {
     return reply.send(result.rows);
   });
 
+  app.get("/classes/:id/subjects/:subjectId", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const pool = getPool();
+    const { id, subjectId } = req.params as { id: string; subjectId: string };
+
+    const result = await pool.query(
+      `select id, class_id, name, slug, created_at, updated_at
+       from class_subjects
+       where class_id = $1 and id = $2
+       limit 1`,
+      [id, subjectId],
+    );
+
+    const row = result.rows[0];
+    if (!row) return reply.code(404).send({ message: "Not found" });
+    return reply.send(row);
+  });
+
   app.post("/classes/:id/subjects", async (req, reply) => {
     const auth = await requireAuth(req);
     if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
@@ -295,10 +330,10 @@ export async function registerClassRoutes(app: FastifyInstance) {
     if (!subject.rows[0]) return reply.code(404).send({ message: "Not found" });
 
     const result = await pool.query(
-      `select id, subject_id, name, created_at, updated_at
+      `select id, subject_id, name, is_completed, position, created_at, updated_at
        from class_subject_topics
        where subject_id = $1
-       order by created_at asc`,
+       order by position asc, created_at asc`,
       [subjectId],
     );
     return reply.send(result.rows);
@@ -326,15 +361,138 @@ export async function registerClassRoutes(app: FastifyInstance) {
     if (!subject.rows[0]) return reply.code(404).send({ message: "Not found" });
 
     const name = parsed.data.name.trim();
+    const nextPosRes = await pool.query(
+      `select coalesce(max(position), -1) as max_pos
+       from class_subject_topics
+       where subject_id = $1`,
+      [subjectId],
+    );
+    const nextPosition = Number(nextPosRes.rows[0]?.max_pos ?? -1) + 1;
     const created = await pool.query(
-      `insert into class_subject_topics (subject_id, name)
-       values ($1, $2)
-       on conflict (subject_id, name) do update set updated_at = now()
-       returning id, subject_id, name, created_at, updated_at`,
-      [subjectId, name],
+      `insert into class_subject_topics (subject_id, name, position)
+       values ($1, $2, $3)
+       on conflict (subject_id, name)
+       do update set updated_at = now()
+       returning id, subject_id, name, is_completed, position, created_at, updated_at`,
+      [subjectId, name, nextPosition],
     );
 
     return reply.code(201).send(created.rows[0]);
+  });
+
+  app.delete("/classes/:id/topics/:topicId", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const pool = getPool();
+    const { id, topicId } = req.params as { id: string; topicId: string };
+
+    const existing = await pool.query(
+      `select t.id
+       from class_subject_topics t
+       join class_subjects s on s.id = t.subject_id
+       where s.class_id = $1 and t.id = $2
+       limit 1`,
+      [id, topicId],
+    );
+    if (!existing.rows[0]) return reply.code(404).send({ message: "Not found" });
+
+    await pool.query(`delete from class_subject_topics where id = $1`, [topicId]);
+    return reply.code(204).send();
+  });
+
+  app.patch("/classes/:id/subjects/:subjectId/topics/reorder", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const parsed = ReorderIdsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ message: "Invalid body", errors: parsed.error.issues });
+    }
+
+    const pool = getPool();
+    const { id, subjectId } = req.params as { id: string; subjectId: string };
+
+    const subject = await pool.query(
+      `select s.id
+       from class_subjects s
+       where s.class_id = $1 and s.id = $2
+       limit 1`,
+      [id, subjectId],
+    );
+    if (!subject.rows[0]) return reply.code(404).send({ message: "Not found" });
+
+    const ids = parsed.data.ids;
+    const found = await pool.query(
+      `select id from class_subject_topics where subject_id = $1 and id = any($2::uuid[])`,
+      [subjectId, ids],
+    );
+    if (found.rowCount !== ids.length) {
+      return reply.code(400).send({ message: "Some chapters do not belong to this subject" });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query("begin");
+      for (let i = 0; i < ids.length; i++) {
+        await client.query(
+          `update class_subject_topics
+           set position = $2,
+               updated_at = now()
+           where id = $1`,
+          [ids[i], i],
+        );
+      }
+      await client.query("commit");
+    } catch (err) {
+      await client.query("rollback");
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    const result = await pool.query(
+      `select id, subject_id, name, is_completed, position, created_at, updated_at
+       from class_subject_topics
+       where subject_id = $1
+       order by position asc, created_at asc`,
+      [subjectId],
+    );
+    return reply.send(result.rows);
+  });
+
+  app.patch("/classes/:id/topics/:topicId", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const parsed = ToggleCompletedSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ message: "Invalid body", errors: parsed.error.issues });
+    }
+
+    const pool = getPool();
+    const { id, topicId } = req.params as { id: string; topicId: string };
+
+    const existing = await pool.query(
+      `select t.id
+       from class_subject_topics t
+       join class_subjects s on s.id = t.subject_id
+       where s.class_id = $1 and t.id = $2
+       limit 1`,
+      [id, topicId],
+    );
+    if (!existing.rows[0]) return reply.code(404).send({ message: "Not found" });
+
+    const updated = await pool.query(
+      `update class_subject_topics
+       set is_completed = $2,
+           updated_at = now()
+       where id = $1
+       returning id, subject_id, name, is_completed, created_at, updated_at`,
+      [topicId, parsed.data.is_completed],
+    );
+
+    return reply.send(updated.rows[0]);
   });
 
   app.get("/classes/:id/topics/:topicId/parts", async (req, reply) => {
@@ -355,10 +513,10 @@ export async function registerClassRoutes(app: FastifyInstance) {
     if (!topic.rows[0]) return reply.code(404).send({ message: "Not found" });
 
     const result = await pool.query(
-      `select id, topic_id, name, created_at, updated_at
+      `select id, topic_id, name, is_completed, position, created_at, updated_at
        from class_topic_parts
        where topic_id = $1
-       order by created_at asc`,
+       order by position asc, created_at asc`,
       [topicId],
     );
 
@@ -388,12 +546,202 @@ export async function registerClassRoutes(app: FastifyInstance) {
     if (!topic.rows[0]) return reply.code(404).send({ message: "Not found" });
 
     const name = parsed.data.name.trim();
+    const nextPosRes = await pool.query(
+      `select coalesce(max(position), -1) as max_pos
+       from class_topic_parts
+       where topic_id = $1`,
+      [topicId],
+    );
+    const nextPosition = Number(nextPosRes.rows[0]?.max_pos ?? -1) + 1;
     const created = await pool.query(
-      `insert into class_topic_parts (topic_id, name)
-       values ($1, $2)
-       on conflict (topic_id, name) do update set updated_at = now()
-       returning id, topic_id, name, created_at, updated_at`,
-      [topicId, name],
+      `insert into class_topic_parts (topic_id, name, position)
+       values ($1, $2, $3)
+       on conflict (topic_id, name)
+       do update set updated_at = now()
+       returning id, topic_id, name, is_completed, position, created_at, updated_at`,
+      [topicId, name, nextPosition],
+    );
+
+    return reply.code(201).send(created.rows[0]);
+  });
+
+  app.delete("/classes/:id/parts/:partId", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const pool = getPool();
+    const { id, partId } = req.params as { id: string; partId: string };
+
+    const existing = await pool.query(
+      `select p.id
+       from class_topic_parts p
+       join class_subject_topics t on t.id = p.topic_id
+       join class_subjects s on s.id = t.subject_id
+       where s.class_id = $1 and p.id = $2
+       limit 1`,
+      [id, partId],
+    );
+    if (!existing.rows[0]) return reply.code(404).send({ message: "Not found" });
+
+    await pool.query(`delete from class_topic_parts where id = $1`, [partId]);
+    return reply.code(204).send();
+  });
+
+  app.patch("/classes/:id/topics/:topicId/parts/reorder", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const parsed = ReorderIdsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ message: "Invalid body", errors: parsed.error.issues });
+    }
+
+    const pool = getPool();
+    const { id, topicId } = req.params as { id: string; topicId: string };
+
+    const topic = await pool.query(
+      `select t.id
+       from class_subject_topics t
+       join class_subjects s on s.id = t.subject_id
+       where s.class_id = $1 and t.id = $2
+       limit 1`,
+      [id, topicId],
+    );
+    if (!topic.rows[0]) return reply.code(404).send({ message: "Not found" });
+
+    const ids = parsed.data.ids;
+    const found = await pool.query(
+      `select id from class_topic_parts where topic_id = $1 and id = any($2::uuid[])`,
+      [topicId, ids],
+    );
+    if (found.rowCount !== ids.length) {
+      return reply.code(400).send({ message: "Some subparts do not belong to this chapter" });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query("begin");
+      for (let i = 0; i < ids.length; i++) {
+        await client.query(
+          `update class_topic_parts
+           set position = $2,
+               updated_at = now()
+           where id = $1`,
+          [ids[i], i],
+        );
+      }
+      await client.query("commit");
+    } catch (err) {
+      await client.query("rollback");
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    const result = await pool.query(
+      `select id, topic_id, name, is_completed, position, created_at, updated_at
+       from class_topic_parts
+       where topic_id = $1
+       order by position asc, created_at asc`,
+      [topicId],
+    );
+    return reply.send(result.rows);
+  });
+
+  app.patch("/classes/:id/parts/:partId", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const parsed = ToggleCompletedSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ message: "Invalid body", errors: parsed.error.issues });
+    }
+
+    const pool = getPool();
+    const { id, partId } = req.params as { id: string; partId: string };
+
+    const existing = await pool.query(
+      `select p.id
+       from class_topic_parts p
+       join class_subject_topics t on t.id = p.topic_id
+       join class_subjects s on s.id = t.subject_id
+       where s.class_id = $1 and p.id = $2
+       limit 1`,
+      [id, partId],
+    );
+    if (!existing.rows[0]) return reply.code(404).send({ message: "Not found" });
+
+    const updated = await pool.query(
+      `update class_topic_parts
+       set is_completed = $2,
+           updated_at = now()
+       where id = $1
+       returning id, topic_id, name, is_completed, created_at, updated_at`,
+      [partId, parsed.data.is_completed],
+    );
+
+    return reply.send(updated.rows[0]);
+  });
+
+  app.get("/classes/:id/subjects/:subjectId/materials", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const pool = getPool();
+    const { id, subjectId } = req.params as { id: string; subjectId: string };
+
+    const subject = await pool.query(
+      `select s.id
+       from class_subjects s
+       where s.class_id = $1 and s.id = $2
+       limit 1`,
+      [id, subjectId],
+    );
+    if (!subject.rows[0]) return reply.code(404).send({ message: "Not found" });
+
+    const result = await pool.query(
+      `select id, subject_id, title, description, url, thumbnail_url, created_at, updated_at
+       from class_subject_materials
+       where subject_id = $1
+       order by created_at desc`,
+      [subjectId],
+    );
+    return reply.send(result.rows);
+  });
+
+  app.post("/classes/:id/subjects/:subjectId/materials", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const parsed = CreateMaterialSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ message: "Invalid body", errors: parsed.error.issues });
+    }
+
+    const pool = getPool();
+    const { id, subjectId } = req.params as { id: string; subjectId: string };
+
+    const subject = await pool.query(
+      `select s.id
+       from class_subjects s
+       where s.class_id = $1 and s.id = $2
+       limit 1`,
+      [id, subjectId],
+    );
+    if (!subject.rows[0]) return reply.code(404).send({ message: "Not found" });
+
+    const data = parsed.data;
+    const created = await pool.query(
+      `insert into class_subject_materials (subject_id, title, description, url, thumbnail_url)
+       values ($1, $2, $3, $4, $5)
+       returning id, subject_id, title, description, url, thumbnail_url, created_at, updated_at`,
+      [
+        subjectId,
+        data.title.trim(),
+        (data.description ?? null) ? String(data.description).trim() : null,
+        data.url.trim(),
+        (data.thumbnail_url ?? null) ? String(data.thumbnail_url).trim() : null,
+      ],
     );
 
     return reply.code(201).send(created.rows[0]);
