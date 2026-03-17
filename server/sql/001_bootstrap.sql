@@ -47,6 +47,33 @@ create table if not exists classes (
   updated_at timestamptz not null default now()
 );
 
+-- If the table existed from a previous bootstrap, ensure new columns exist.
+alter table classes add column if not exists short_description text;
+alter table classes add column if not exists class_timing text;
+alter table classes add column if not exists thumbnail_url text;
+
+-- Class weekly schedule (per-day timing; days can be off)
+create table if not exists class_weekly_schedule (
+  id uuid primary key default gen_random_uuid(),
+  class_id uuid not null references classes(id) on delete cascade,
+  -- 0=Mon ... 6=Sun
+  day_of_week integer not null check (day_of_week >= 0 and day_of_week <= 6),
+  is_off boolean not null default false,
+  start_time time null,
+  end_time time null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (class_id, day_of_week),
+  check (
+    (is_off and start_time is null and end_time is null)
+    or
+    (not is_off and start_time is not null and end_time is not null and start_time < end_time)
+  )
+);
+
+create index if not exists idx_class_weekly_schedule_class_id on class_weekly_schedule (class_id);
+create index if not exists idx_class_weekly_schedule_day_of_week on class_weekly_schedule (day_of_week);
+
 create index if not exists idx_classes_status on classes (status);
 
 create table if not exists students (
@@ -74,6 +101,79 @@ alter table students add column if not exists address text;
 create index if not exists idx_students_full_name on students (full_name);
 create index if not exists idx_students_phone on students (phone);
 create index if not exists idx_students_account_master_id on students (account_master_id);
+
+-- Class enrollments (students can join multiple classes)
+create table if not exists class_enrollments (
+  id uuid primary key default gen_random_uuid(),
+  class_id uuid not null references classes(id) on delete cascade,
+  student_id uuid not null references students(id) on delete cascade,
+  start_date date not null default current_date,
+  end_date date null,
+  status text not null default 'active',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_class_enrollments_class_id on class_enrollments (class_id);
+create index if not exists idx_class_enrollments_student_id on class_enrollments (student_id);
+
+-- Prevent duplicate active enrollment for same student in same class
+create unique index if not exists ux_class_enrollments_active
+  on class_enrollments (class_id, student_id)
+  where status = 'active' and end_date is null;
+
+-- Subjects (planned; supports per-subject uploads later)
+create table if not exists class_subjects (
+  id uuid primary key default gen_random_uuid(),
+  class_id uuid not null references classes(id) on delete cascade,
+  name text not null,
+  slug text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (class_id, slug)
+);
+
+create index if not exists idx_class_subjects_class_id on class_subjects (class_id);
+
+-- Subject topics / chapters
+create table if not exists class_subject_topics (
+  id uuid primary key default gen_random_uuid(),
+  subject_id uuid not null references class_subjects(id) on delete cascade,
+  name text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (subject_id, name)
+);
+
+create index if not exists idx_class_subject_topics_subject_id on class_subject_topics (subject_id);
+
+-- Topic parts / subparts
+create table if not exists class_topic_parts (
+  id uuid primary key default gen_random_uuid(),
+  topic_id uuid not null references class_subject_topics(id) on delete cascade,
+  name text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (topic_id, name)
+);
+
+create index if not exists idx_class_topic_parts_topic_id on class_topic_parts (topic_id);
+
+-- Documents (planned; stores metadata for anything uploaded under Uploads/)
+create table if not exists class_documents (
+  id uuid primary key default gen_random_uuid(),
+  class_id uuid not null references classes(id) on delete cascade,
+  subject_id uuid null references class_subjects(id) on delete set null,
+  title text not null,
+  file_path text not null,
+  mime_type text null,
+  size_bytes bigint null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_class_documents_class_id on class_documents (class_id);
+create index if not exists idx_class_documents_subject_id on class_documents (subject_id);
 
 -- Account master (minimal party/sub-ledger master)
 create table if not exists account_master (

@@ -59,7 +59,7 @@ export function AddStudentModal({ isOpen, onClose, availableClasses = [], onCrea
     const [aadhar, setAadhar] = useState('');
     const [guardianName, setGuardianName] = useState('');
     const [address, setAddress] = useState('');
-    const [selectedClass, setSelectedClass] = useState<string>('');
+    const [selectedClassIds, setSelectedClassIds] = useState<string[]>([]);
     const [saving, setSaving] = useState(false);
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -72,6 +72,10 @@ export function AddStudentModal({ isOpen, onClose, availableClasses = [], onCrea
 
         setSaving(true);
         try {
+            if ((admissionType === 'Coaching Only' || admissionType === 'Both') && selectedClassIds.length === 0) {
+                throw new Error('Please select at least one class');
+            }
+
             const payload = {
                 name,
                 phone,
@@ -80,7 +84,7 @@ export function AddStudentModal({ isOpen, onClose, availableClasses = [], onCrea
                 guardian_name: guardianName || undefined,
                 address: address || undefined,
                 admission_type: admissionType,
-                class: selectedClass ? Number(selectedClass) : undefined,
+                class_ids: selectedClassIds.length ? selectedClassIds : undefined,
             };
 
             const res = await fetch(`${API_BASE_URL}/students`, {
@@ -217,13 +221,16 @@ export function AddStudentModal({ isOpen, onClose, availableClasses = [], onCrea
                     <select
                         className={styles.select}
                         required
-                        value={selectedClass}
-                        onChange={(e) => setSelectedClass(e.target.value)}
+                        multiple
+                        value={selectedClassIds}
+                        onChange={(e) => {
+                            const next = Array.from(e.target.selectedOptions).map((o) => o.value);
+                            setSelectedClassIds(next);
+                        }}
                     >
-                        <option value="">-- Select Class --</option>
                         {availableClasses.length > 0 ? (
                             availableClasses.map((cls) => (
-                                <option key={cls.id} value={cls.id}>{cls.name}</option>
+                                <option key={cls.id} value={String(cls.id)}>{cls.name}</option>
                             ))
                         ) : (
                             <option disabled>No classes available</option>
@@ -241,13 +248,87 @@ interface AddBatchModalProps {
     onCreated?: () => void;
 }
 
+type WeeklyScheduleEntry = {
+    // 0=Mon ... 6=Sun
+    day_of_week: number;
+    is_off: boolean;
+    start_time: string | null;
+    end_time: string | null;
+};
+
+const WEEK_DAYS: Array<{ day: number; label: string; short: string }> = [
+    { day: 0, label: 'Monday', short: 'Mon' },
+    { day: 1, label: 'Tuesday', short: 'Tue' },
+    { day: 2, label: 'Wednesday', short: 'Wed' },
+    { day: 3, label: 'Thursday', short: 'Thu' },
+    { day: 4, label: 'Friday', short: 'Fri' },
+    { day: 5, label: 'Saturday', short: 'Sat' },
+    { day: 6, label: 'Sunday', short: 'Sun' },
+];
+
+function createDefaultWeeklySchedule(): WeeklyScheduleEntry[] {
+    return WEEK_DAYS.map((d) => ({
+        day_of_week: d.day,
+        is_off: true,
+        start_time: null,
+        end_time: null,
+    }));
+}
+
+function mergeScheduleWithDefaults(fromApi: WeeklyScheduleEntry[] | undefined | null): WeeklyScheduleEntry[] {
+    const base = createDefaultWeeklySchedule();
+    const map = new Map<number, WeeklyScheduleEntry>();
+    for (const e of fromApi ?? []) {
+        map.set(e.day_of_week, {
+            day_of_week: e.day_of_week,
+            is_off: Boolean(e.is_off),
+            start_time: e.start_time ?? null,
+            end_time: e.end_time ?? null,
+        });
+    }
+    return base
+        .map((d) => map.get(d.day_of_week) ?? d)
+        .sort((a, b) => a.day_of_week - b.day_of_week);
+}
+
+function isScheduleValid(schedule: WeeklyScheduleEntry[]): boolean {
+    return schedule.some((e) => {
+        if (e.is_off) return false;
+        if (!e.start_time || !e.end_time) return false;
+        return e.start_time < e.end_time;
+    });
+}
+
+function normalizeScheduleForSave(schedule: WeeklyScheduleEntry[]): WeeklyScheduleEntry[] {
+    return [...schedule]
+        .sort((a, b) => a.day_of_week - b.day_of_week)
+        .map((e) =>
+            e.is_off
+                ? { day_of_week: e.day_of_week, is_off: true, start_time: null, end_time: null }
+                : {
+                    day_of_week: e.day_of_week,
+                    is_off: false,
+                    start_time: e.start_time ?? null,
+                    end_time: e.end_time ?? null,
+                },
+        );
+}
+
 export function AddBatchModal({ isOpen, onClose, onCreated }: AddBatchModalProps) {
     const [name, setName] = useState('');
+    const [shortDescription, setShortDescription] = useState('');
+    const [weeklySchedule, setWeeklySchedule] = useState<WeeklyScheduleEntry[]>(createDefaultWeeklySchedule());
+    const [thumbnail, setThumbnail] = useState<File | null>(null);
+    const [fileInputKey, setFileInputKey] = useState(0);
     const [saving, setSaving] = useState(false);
 
     const handleClose = () => {
         if (saving) return;
         setName('');
+        setShortDescription('');
+        setWeeklySchedule(createDefaultWeeklySchedule());
+        setThumbnail(null);
+        setFileInputKey((k) => k + 1);
         onClose();
     };
 
@@ -260,7 +341,11 @@ export function AddBatchModal({ isOpen, onClose, onCreated }: AddBatchModalProps
         }
 
         const trimmed = name.trim();
+        const descTrimmed = shortDescription.trim();
         if (!trimmed) return;
+        if (!descTrimmed) return;
+        if (!isScheduleValid(weeklySchedule)) return;
+        if (!thumbnail) return;
 
         setSaving(true);
         try {
@@ -270,7 +355,11 @@ export function AddBatchModal({ isOpen, onClose, onCreated }: AddBatchModalProps
                     'Content-Type': 'application/json',
                     Authorization: `Bearer ${token}`,
                 },
-                body: JSON.stringify({ name: trimmed }),
+                body: JSON.stringify({
+                    name: trimmed,
+                    short_description: descTrimmed,
+                    schedule: normalizeScheduleForSave(weeklySchedule),
+                }),
             });
 
             if (!res.ok) {
@@ -279,7 +368,34 @@ export function AddBatchModal({ isOpen, onClose, onCreated }: AddBatchModalProps
                 return;
             }
 
+            const created = await res.json().catch(() => null);
+            const createdId = created?.id as string | undefined;
+            if (!createdId) {
+                alert('Class created, but response was invalid');
+                return;
+            }
+
+            const fd = new FormData();
+            fd.append('thumbnail', thumbnail);
+            const uploadRes = await fetch(`${API_BASE_URL}/classes/${createdId}/thumbnail`, {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+                body: fd,
+            });
+
+            if (!uploadRes.ok) {
+                const msg = await uploadRes.text().catch(() => '');
+                alert(msg || 'Failed to upload thumbnail');
+                return;
+            }
+
             setName('');
+            setShortDescription('');
+            setWeeklySchedule(createDefaultWeeklySchedule());
+            setThumbnail(null);
+            setFileInputKey((k) => k + 1);
             onClose();
             onCreated?.();
         } catch {
@@ -295,7 +411,13 @@ export function AddBatchModal({ isOpen, onClose, onCreated }: AddBatchModalProps
             onClose={handleClose}
             title="Create New Class"
             onSubmit={handleSubmit}
-            submitDisabled={saving || !name.trim()}
+            submitDisabled={
+                saving ||
+                !name.trim() ||
+                !shortDescription.trim() ||
+                !isScheduleValid(weeklySchedule) ||
+                !thumbnail
+            }
         >
             <div className={styles.inputGroup}>
                 <label className={styles.label}>Class Name</label>
@@ -306,6 +428,320 @@ export function AddBatchModal({ isOpen, onClose, onCreated }: AddBatchModalProps
                     required
                     value={name}
                     onChange={(e) => setName(e.target.value)}
+                />
+            </div>
+
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Short Description</label>
+                <textarea
+                    className={styles.input}
+                    rows={2}
+                    placeholder="e.g. Foundation batch for Class 6 students"
+                    required
+                    value={shortDescription}
+                    onChange={(e) => setShortDescription(e.target.value)}
+                    style={{ resize: 'vertical' }}
+                />
+            </div>
+
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Weekly Schedule</label>
+                <div className={styles.scheduleTable}>
+                    {WEEK_DAYS.map((d) => {
+                        const entry = weeklySchedule.find((e) => e.day_of_week === d.day) ?? {
+                            day_of_week: d.day,
+                            is_off: true,
+                            start_time: null,
+                            end_time: null,
+                        };
+
+                        return (
+                            <div key={d.day} className={styles.scheduleRow}>
+                                <div className={styles.scheduleDay}>{d.label}</div>
+
+                                <div className={styles.scheduleTimes}>
+                                    <input
+                                        type="time"
+                                        className={styles.input}
+                                        value={entry.start_time ?? ''}
+                                        disabled={entry.is_off}
+                                        onChange={(e) => {
+                                            const next = weeklySchedule.map((x) =>
+                                                x.day_of_week === d.day
+                                                    ? { ...x, is_off: false, start_time: e.target.value || null }
+                                                    : x,
+                                            );
+                                            setWeeklySchedule(next);
+                                        }}
+                                    />
+                                    <span className={styles.scheduleDash}>–</span>
+                                    <input
+                                        type="time"
+                                        className={styles.input}
+                                        value={entry.end_time ?? ''}
+                                        disabled={entry.is_off}
+                                        onChange={(e) => {
+                                            const next = weeklySchedule.map((x) =>
+                                                x.day_of_week === d.day
+                                                    ? { ...x, is_off: false, end_time: e.target.value || null }
+                                                    : x,
+                                            );
+                                            setWeeklySchedule(next);
+                                        }}
+                                    />
+                                </div>
+
+                                <label className={styles.scheduleOff}>
+                                    <input
+                                        type="checkbox"
+                                        checked={entry.is_off}
+                                        onChange={(e) => {
+                                            const isOff = e.target.checked;
+                                            const next = weeklySchedule.map((x) =>
+                                                x.day_of_week === d.day
+                                                    ? {
+                                                        ...x,
+                                                        is_off: isOff,
+                                                        start_time: isOff ? null : x.start_time,
+                                                        end_time: isOff ? null : x.end_time,
+                                                    }
+                                                    : x,
+                                            );
+                                            setWeeklySchedule(next);
+                                        }}
+                                    />
+                                    Off
+                                </label>
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Thumbnail</label>
+                <input
+                    key={fileInputKey}
+                    type="file"
+                    className={styles.input}
+                    accept="image/*"
+                    required
+                    onChange={(e) => setThumbnail(e.target.files?.[0] ?? null)}
+                />
+            </div>
+        </BaseModal>
+    );
+}
+
+interface EditClassModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+    classId: string;
+    defaultName: string;
+    defaultShortDescription?: string | null;
+    defaultSchedule?: WeeklyScheduleEntry[] | null;
+    onSaved?: () => void;
+}
+
+export function EditClassModal({
+    isOpen,
+    onClose,
+    classId,
+    defaultName,
+    defaultShortDescription,
+    defaultSchedule,
+    onSaved,
+}: EditClassModalProps) {
+    const [name, setName] = useState(defaultName);
+    const [shortDescription, setShortDescription] = useState(defaultShortDescription ?? '');
+    const [weeklySchedule, setWeeklySchedule] = useState<WeeklyScheduleEntry[]>(mergeScheduleWithDefaults(defaultSchedule ?? undefined));
+    const [thumbnail, setThumbnail] = useState<File | null>(null);
+    const [fileInputKey, setFileInputKey] = useState(0);
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        setName(defaultName);
+        setShortDescription(defaultShortDescription ?? '');
+        setWeeklySchedule(mergeScheduleWithDefaults(defaultSchedule ?? undefined));
+        setThumbnail(null);
+        setFileInputKey((k) => k + 1);
+    }, [isOpen, defaultName, defaultShortDescription, defaultSchedule]);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        if (!token) {
+            alert('You are not logged in.');
+            return;
+        }
+
+        const trimmed = name.trim();
+        const descTrimmed = shortDescription.trim();
+        if (!trimmed || !descTrimmed) return;
+        if (!isScheduleValid(weeklySchedule)) return;
+
+        setSaving(true);
+        try {
+            const res = await fetch(`${API_BASE_URL}/classes/${classId}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({
+                    name: trimmed,
+                    short_description: descTrimmed,
+                    schedule: normalizeScheduleForSave(weeklySchedule),
+                }),
+            });
+
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                throw new Error(body?.message || 'Failed to save class');
+            }
+
+            if (thumbnail) {
+                const fd = new FormData();
+                fd.append('thumbnail', thumbnail);
+                const uploadRes = await fetch(`${API_BASE_URL}/classes/${classId}/thumbnail`, {
+                    method: 'POST',
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                    },
+                    body: fd,
+                });
+
+                if (!uploadRes.ok) {
+                    const msg = await uploadRes.text().catch(() => '');
+                    throw new Error(msg || 'Failed to upload thumbnail');
+                }
+            }
+
+            onSaved?.();
+            onClose();
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            alert(message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <BaseModal
+            isOpen={isOpen}
+            onClose={onClose}
+            title="Class Settings"
+            onSubmit={handleSubmit}
+            submitDisabled={saving || !name.trim() || !shortDescription.trim() || !isScheduleValid(weeklySchedule)}
+            submitLabel={saving ? 'Saving...' : 'Save'}
+        >
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Class Name</label>
+                <input
+                    type="text"
+                    className={styles.input}
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                />
+            </div>
+
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Short Description</label>
+                <textarea
+                    className={styles.input}
+                    rows={2}
+                    required
+                    value={shortDescription}
+                    onChange={(e) => setShortDescription(e.target.value)}
+                    style={{ resize: 'vertical' }}
+                />
+            </div>
+
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Weekly Schedule</label>
+                <div className={styles.scheduleTable}>
+                    {WEEK_DAYS.map((d) => {
+                        const entry = weeklySchedule.find((e) => e.day_of_week === d.day) ?? {
+                            day_of_week: d.day,
+                            is_off: true,
+                            start_time: null,
+                            end_time: null,
+                        };
+
+                        return (
+                            <div key={d.day} className={styles.scheduleRow}>
+                                <div className={styles.scheduleDay}>{d.label}</div>
+
+                                <div className={styles.scheduleTimes}>
+                                    <input
+                                        type="time"
+                                        className={styles.input}
+                                        value={entry.start_time ?? ''}
+                                        disabled={entry.is_off}
+                                        onChange={(e) => {
+                                            const next = weeklySchedule.map((x) =>
+                                                x.day_of_week === d.day
+                                                    ? { ...x, is_off: false, start_time: e.target.value || null }
+                                                    : x,
+                                            );
+                                            setWeeklySchedule(next);
+                                        }}
+                                    />
+                                    <span className={styles.scheduleDash}>–</span>
+                                    <input
+                                        type="time"
+                                        className={styles.input}
+                                        value={entry.end_time ?? ''}
+                                        disabled={entry.is_off}
+                                        onChange={(e) => {
+                                            const next = weeklySchedule.map((x) =>
+                                                x.day_of_week === d.day
+                                                    ? { ...x, is_off: false, end_time: e.target.value || null }
+                                                    : x,
+                                            );
+                                            setWeeklySchedule(next);
+                                        }}
+                                    />
+                                </div>
+
+                                <label className={styles.scheduleOff}>
+                                    <input
+                                        type="checkbox"
+                                        checked={entry.is_off}
+                                        onChange={(e) => {
+                                            const isOff = e.target.checked;
+                                            const next = weeklySchedule.map((x) =>
+                                                x.day_of_week === d.day
+                                                    ? {
+                                                        ...x,
+                                                        is_off: isOff,
+                                                        start_time: isOff ? null : x.start_time,
+                                                        end_time: isOff ? null : x.end_time,
+                                                    }
+                                                    : x,
+                                            );
+                                            setWeeklySchedule(next);
+                                        }}
+                                    />
+                                    Off
+                                </label>
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Update Thumbnail (optional)</label>
+                <input
+                    key={fileInputKey}
+                    type="file"
+                    className={styles.input}
+                    accept="image/*"
+                    onChange={(e) => setThumbnail(e.target.files?.[0] ?? null)}
                 />
             </div>
         </BaseModal>
@@ -1121,15 +1557,22 @@ export function EditHallModal({ isOpen, onClose, hallId, defaultName, onUpdated 
             });
             const body = await res.json().catch(() => ([]));
             if (!res.ok) throw new Error('Failed to load seats');
-            const list = Array.isArray(body) ? body : [];
+            const list = Array.isArray(body) ? (body as unknown[]) : [];
             const filtered = list
-                .filter((s: any) => s?.hall_id === hallId)
-                .map((s: any) => ({
-                    id: String(s.id),
-                    seat_number: String(s.seat_number ?? ''),
-                    status: s.status as 'available' | 'occupied' | 'maintenance',
-                }))
-                .sort((a: any, b: any) =>
+                .map((raw) => (raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null))
+                .filter((rec): rec is Record<string, unknown> => Boolean(rec))
+                .filter((rec) => String(rec.hall_id ?? '') === String(hallId))
+                .map((rec) => {
+                    const statusRaw = rec.status;
+                    const status: 'available' | 'occupied' | 'maintenance' =
+                        statusRaw === 'occupied' || statusRaw === 'maintenance' ? statusRaw : 'available';
+                    return {
+                        id: String(rec.id),
+                        seat_number: String(rec.seat_number ?? ''),
+                        status,
+                    };
+                })
+                .sort((a, b) =>
                     String(a.seat_number).localeCompare(String(b.seat_number), undefined, { numeric: true, sensitivity: 'base' }),
                 );
             setSeats(filtered);
@@ -1452,13 +1895,22 @@ export function EditShiftPricesModal({ isOpen, onClose, shiftId, onUpdated }: Ed
 
                 setSeatTypes(types);
 
-                const shift = shifts.find((s: any) => s?.id === shiftId);
+                const shift = shifts
+                    .map((raw) => (raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null))
+                    .filter((rec): rec is Record<string, unknown> => Boolean(rec))
+                    .find((rec) => String(rec.id ?? '') === String(shiftId));
                 const next: Record<string, string> = {};
                 for (const t of types) next[t.id] = '';
 
-                if (shift?.pricing && Array.isArray(shift.pricing)) {
-                    for (const row of shift.pricing) {
-                        if (row?.seat_type_id) next[row.seat_type_id] = String(row.monthly_fee ?? '');
+                const pricingRaw = shift?.pricing;
+                if (Array.isArray(pricingRaw)) {
+                    for (const rowRaw of pricingRaw) {
+                        if (!rowRaw || typeof rowRaw !== 'object') continue;
+                        const row = rowRaw as Record<string, unknown>;
+                        const seatTypeId = row.seat_type_id;
+                        if (typeof seatTypeId === 'string' && seatTypeId) {
+                            next[seatTypeId] = String(row.monthly_fee ?? '');
+                        }
                     }
                 }
                 setPricingByType(next);
@@ -1481,7 +1933,7 @@ export function EditShiftPricesModal({ isOpen, onClose, shiftId, onUpdated }: Ed
             return;
         }
 
-        let payload: any = {};
+        let payload: Record<string, unknown> = {};
         if (seatTypes.length > 0) {
             const rows: Array<{ seat_type_id: string; monthly_fee: number }> = [];
             for (const t of seatTypes) {
@@ -1943,6 +2395,45 @@ export function AddTopicModal({ isOpen, onClose, onAdd, subjectName }: AddTopicM
                     required
                     value={topic}
                     onChange={(e) => setTopic(e.target.value)}
+                />
+            </div>
+        </BaseModal>
+    );
+}
+
+interface AddSubpartModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+    onAdd: (name: string) => void;
+    topicName?: string;
+}
+
+export function AddSubpartModal({ isOpen, onClose, onAdd, topicName }: AddSubpartModalProps) {
+    const [name, setName] = useState("");
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        onAdd(name);
+        setName("");
+        onClose();
+    };
+
+    return (
+        <BaseModal
+            isOpen={isOpen}
+            onClose={onClose}
+            title={`Add Subpart to ${topicName || 'Chapter'}`}
+            onSubmit={handleSubmit}
+        >
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Subpart Name</label>
+                <input
+                    type="text"
+                    className={styles.input}
+                    placeholder="e.g. Laws of Motion"
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
                 />
             </div>
         </BaseModal>

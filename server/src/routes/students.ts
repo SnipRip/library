@@ -14,6 +14,9 @@ const CreateStudentSchema = z.object({
   address: z.string().optional().nullable(),
   admission_type: z.string().optional().nullable(),
   status: z.string().optional().default("active"),
+  // New flow: students can join multiple classes
+  class_ids: z.array(z.string().uuid()).optional().default([]),
+  // Legacy (ignored): older clients may send `class` as a number
   class: z.number().int().optional(),
 });
 
@@ -56,6 +59,7 @@ export async function registerStudentRoutes(app: FastifyInstance) {
       address,
       admission_type,
       status,
+      class_ids,
     } = parsed.data;
 
     const client = await pool.connect();
@@ -107,6 +111,17 @@ export async function registerStudentRoutes(app: FastifyInstance) {
            where id = $1`,
           [account_master_id, studentId],
         );
+
+        if (class_ids && class_ids.length > 0) {
+          await client.query(
+            `insert into class_enrollments (class_id, student_id)
+             select unnest($1::uuid[]), $2::uuid
+             on conflict (class_id, student_id)
+             where status = 'active' and end_date is null
+             do nothing`,
+            [class_ids, studentId],
+          );
+        }
       }
 
       await client.query("commit");
