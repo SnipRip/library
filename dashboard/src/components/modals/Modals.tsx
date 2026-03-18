@@ -3,6 +3,205 @@
 import { useEffect, useState } from 'react';
 import styles from './Modal.module.css';
 import { API_BASE_URL } from '@/lib/api';
+import Cropper, { type Area } from 'react-easy-crop';
+
+const CLASS_THUMBNAIL_VIEWBOX_WIDTH = 300;
+const CLASS_THUMBNAIL_VIEWBOX_HEIGHT = 160;
+
+const CLASS_BANNER_VIEWBOX_WIDTH = 600;
+const CLASS_BANNER_VIEWBOX_HEIGHT = 260;
+
+const MATERIAL_THUMBNAIL_VIEWBOX_WIDTH = 72;
+const MATERIAL_THUMBNAIL_VIEWBOX_HEIGHT = 72;
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error('Failed to load image'));
+        img.src = src;
+    });
+}
+
+async function cropImageToFile(params: {
+    imageSrc: string;
+    cropPixels: Area;
+    outWidth: number;
+    outHeight: number;
+    fileName: string;
+    mimeType?: string;
+    quality?: number;
+}): Promise<File> {
+    const { imageSrc, cropPixels, outWidth, outHeight, fileName, mimeType = 'image/jpeg', quality = 0.9 } = params;
+    const image = await loadImage(imageSrc);
+    const canvas = document.createElement('canvas');
+    canvas.width = outWidth;
+    canvas.height = outHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas not supported');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+
+    const imgW = image.naturalWidth || image.width;
+    const imgH = image.naturalHeight || image.height;
+
+    const sx = Math.max(0, Math.floor(cropPixels.x));
+    const sy = Math.max(0, Math.floor(cropPixels.y));
+    const sWidth = Math.max(1, Math.min(imgW - sx, Math.ceil(cropPixels.width)));
+    const sHeight = Math.max(1, Math.min(imgH - sy, Math.ceil(cropPixels.height)));
+
+    // Ensure the canvas is fully painted (avoid any unfilled pixel bands)
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, outWidth, outHeight);
+
+    ctx.drawImage(
+        image,
+        sx,
+        sy,
+        sWidth,
+        sHeight,
+        0,
+        0,
+        outWidth,
+        outHeight,
+    );
+
+    const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+            (b) => {
+                if (!b) return reject(new Error('Failed to export image'));
+                resolve(b);
+            },
+            mimeType,
+            quality,
+        );
+    });
+
+    return new File([blob], fileName, { type: blob.type || mimeType });
+}
+
+interface CropImageModalProps {
+    isOpen: boolean;
+    src: string | null;
+    fileName: string;
+    title: string;
+    outWidth: number;
+    outHeight: number;
+    aspect: number;
+    onClose: () => void;
+    onCropped: (file: File) => void;
+}
+
+function CropImageModal({ isOpen, src, fileName, title, outWidth, outHeight, aspect, onClose, onCropped }: CropImageModalProps) {
+    const [crop, setCrop] = useState({ x: 0, y: 0 });
+    const [zoom, setZoom] = useState(1);
+    const [cropPixels, setCropPixels] = useState<Area | null>(null);
+    const [saving, setSaving] = useState(false);
+    const [objectFit, setObjectFit] = useState<'horizontal-cover' | 'vertical-cover'>('horizontal-cover');
+
+    useEffect(() => {
+        if (!isOpen) return;
+        setCrop({ x: 0, y: 0 });
+        setZoom(1);
+        setCropPixels(null);
+        setSaving(false);
+        setObjectFit('horizontal-cover');
+    }, [isOpen, src]);
+
+    useEffect(() => {
+        if (!isOpen || !src) return;
+        let cancelled = false;
+        void loadImage(src)
+            .then((img) => {
+                if (cancelled) return;
+                const imgW = img.naturalWidth || img.width;
+                const imgH = img.naturalHeight || img.height;
+                if (!imgW || !imgH) return;
+                const imgAspect = imgW / imgH;
+                // If the image is wider than the crop box, cover vertically; otherwise cover horizontally.
+                setObjectFit(imgAspect > aspect ? 'vertical-cover' : 'horizontal-cover');
+            })
+            .catch(() => {
+                // ignore
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [isOpen, src, aspect]);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!src || !cropPixels) return;
+        setSaving(true);
+        try {
+            const cropped = await cropImageToFile({
+                imageSrc: src,
+                cropPixels,
+                outWidth,
+                outHeight,
+                fileName: fileName.replace(/\.[^/.]+$/, '') + '-thumb.jpg',
+                mimeType: 'image/jpeg',
+                quality: 0.9,
+            });
+            onCropped(cropped);
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            alert(message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <BaseModal
+            isOpen={isOpen}
+            onClose={onClose}
+            title={title}
+            onSubmit={handleSubmit}
+            submitDisabled={saving || !src || !cropPixels}
+            submitLabel={saving ? 'Cropping...' : 'Use Thumbnail'}
+        >
+            <div className={styles.inputGroup}>
+                <div className={styles.cropArea}>
+                    {src ? (
+                        <Cropper
+                            image={src}
+                            crop={crop}
+                            zoom={zoom}
+                            aspect={aspect}
+                            onCropChange={setCrop}
+                            onZoomChange={setZoom}
+                            onCropComplete={(_, areaPixels) => setCropPixels(areaPixels)}
+                            restrictPosition
+                            objectFit={objectFit}
+                        />
+                    ) : null}
+                </div>
+            </div>
+
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Zoom</label>
+                <div className={styles.cropControls}>
+                    <input
+                        className={styles.range}
+                        type="range"
+                        min={1}
+                        max={3}
+                        step={0.01}
+                        value={zoom}
+                        onChange={(e) => setZoom(Number(e.target.value))}
+                    />
+                </div>
+            </div>
+
+            <div className={styles.inputGroup}>
+                <div style={{ fontSize: '0.875rem', color: '#64748b' }}>
+                    Output: {outWidth}×{outHeight}
+                </div>
+            </div>
+        </BaseModal>
+    );
+}
 
 interface BaseModalProps {
     isOpen: boolean;
@@ -319,6 +518,9 @@ export function AddBatchModal({ isOpen, onClose, onCreated }: AddBatchModalProps
     const [shortDescription, setShortDescription] = useState('');
     const [weeklySchedule, setWeeklySchedule] = useState<WeeklyScheduleEntry[]>(createDefaultWeeklySchedule());
     const [thumbnail, setThumbnail] = useState<File | null>(null);
+    const [cropOpen, setCropOpen] = useState(false);
+    const [cropSrc, setCropSrc] = useState<string | null>(null);
+    const [cropFileName, setCropFileName] = useState('thumbnail.jpg');
     const [fileInputKey, setFileInputKey] = useState(0);
     const [saving, setSaving] = useState(false);
 
@@ -328,6 +530,9 @@ export function AddBatchModal({ isOpen, onClose, onCreated }: AddBatchModalProps
         setShortDescription('');
         setWeeklySchedule(createDefaultWeeklySchedule());
         setThumbnail(null);
+        if (cropSrc) URL.revokeObjectURL(cropSrc);
+        setCropOpen(false);
+        setCropSrc(null);
         setFileInputKey((k) => k + 1);
         onClose();
     };
@@ -526,9 +731,43 @@ export function AddBatchModal({ isOpen, onClose, onCreated }: AddBatchModalProps
                     className={styles.input}
                     accept="image/*"
                     required
-                    onChange={(e) => setThumbnail(e.target.files?.[0] ?? null)}
+                    onChange={(e) => {
+                        const file = e.target.files?.[0] ?? null;
+                        if (!file) {
+                            setThumbnail(null);
+                            return;
+                        }
+                        if (cropSrc) URL.revokeObjectURL(cropSrc);
+                        const url = URL.createObjectURL(file);
+                        setCropFileName(file.name || 'thumbnail.jpg');
+                        setCropSrc(url);
+                        setCropOpen(true);
+                    }}
                 />
             </div>
+
+            <CropImageModal
+                isOpen={cropOpen}
+                src={cropSrc}
+                fileName={cropFileName}
+                title="Crop Thumbnail"
+                outWidth={CLASS_THUMBNAIL_VIEWBOX_WIDTH}
+                outHeight={CLASS_THUMBNAIL_VIEWBOX_HEIGHT}
+                aspect={CLASS_THUMBNAIL_VIEWBOX_WIDTH / CLASS_THUMBNAIL_VIEWBOX_HEIGHT}
+                onClose={() => {
+                    if (cropSrc) URL.revokeObjectURL(cropSrc);
+                    setCropOpen(false);
+                    setCropSrc(null);
+                    setThumbnail(null);
+                    setFileInputKey((k) => k + 1);
+                }}
+                onCropped={(file) => {
+                    if (cropSrc) URL.revokeObjectURL(cropSrc);
+                    setThumbnail(file);
+                    setCropOpen(false);
+                    setCropSrc(null);
+                }}
+            />
         </BaseModal>
     );
 }
@@ -556,6 +795,9 @@ export function EditClassModal({
     const [shortDescription, setShortDescription] = useState(defaultShortDescription ?? '');
     const [weeklySchedule, setWeeklySchedule] = useState<WeeklyScheduleEntry[]>(mergeScheduleWithDefaults(defaultSchedule ?? undefined));
     const [thumbnail, setThumbnail] = useState<File | null>(null);
+    const [cropOpen, setCropOpen] = useState(false);
+    const [cropSrc, setCropSrc] = useState<string | null>(null);
+    const [cropFileName, setCropFileName] = useState('thumbnail.jpg');
     const [fileInputKey, setFileInputKey] = useState(0);
     const [saving, setSaving] = useState(false);
 
@@ -565,6 +807,11 @@ export function EditClassModal({
         setShortDescription(defaultShortDescription ?? '');
         setWeeklySchedule(mergeScheduleWithDefaults(defaultSchedule ?? undefined));
         setThumbnail(null);
+        setCropOpen(false);
+        setCropSrc((prev) => {
+            if (prev) URL.revokeObjectURL(prev);
+            return null;
+        });
         setFileInputKey((k) => k + 1);
     }, [isOpen, defaultName, defaultShortDescription, defaultSchedule]);
 
@@ -741,9 +988,600 @@ export function EditClassModal({
                     type="file"
                     className={styles.input}
                     accept="image/*"
-                    onChange={(e) => setThumbnail(e.target.files?.[0] ?? null)}
+                    onChange={(e) => {
+                        const file = e.target.files?.[0] ?? null;
+                        if (!file) {
+                            setThumbnail(null);
+                            return;
+                        }
+                        if (cropSrc) URL.revokeObjectURL(cropSrc);
+                        const url = URL.createObjectURL(file);
+                        setCropFileName(file.name || 'thumbnail.jpg');
+                        setCropSrc(url);
+                        setCropOpen(true);
+                    }}
                 />
             </div>
+
+            <CropImageModal
+                isOpen={cropOpen}
+                src={cropSrc}
+                fileName={cropFileName}
+                title="Crop Thumbnail"
+                outWidth={CLASS_THUMBNAIL_VIEWBOX_WIDTH}
+                outHeight={CLASS_THUMBNAIL_VIEWBOX_HEIGHT}
+                aspect={CLASS_THUMBNAIL_VIEWBOX_WIDTH / CLASS_THUMBNAIL_VIEWBOX_HEIGHT}
+                onClose={() => {
+                    if (cropSrc) URL.revokeObjectURL(cropSrc);
+                    setCropOpen(false);
+                    setCropSrc(null);
+                    setThumbnail(null);
+                    setFileInputKey((k) => k + 1);
+                }}
+                onCropped={(file) => {
+                    if (cropSrc) URL.revokeObjectURL(cropSrc);
+                    setThumbnail(file);
+                    setCropOpen(false);
+                    setCropSrc(null);
+                }}
+            />
+        </BaseModal>
+    );
+}
+
+interface EditClassNameModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+    classId: string;
+    defaultName: string;
+    onSaved?: () => void;
+}
+
+export function EditClassNameModal({
+    isOpen,
+    onClose,
+    classId,
+    defaultName,
+    onSaved,
+}: EditClassNameModalProps) {
+    const [name, setName] = useState(defaultName);
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        setName(defaultName);
+    }, [isOpen, defaultName]);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        if (!token) {
+            alert('You are not logged in.');
+            return;
+        }
+
+        const trimmed = name.trim();
+        if (!trimmed) return;
+
+        setSaving(true);
+        try {
+            const res = await fetch(`${API_BASE_URL}/classes/${classId}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ name: trimmed }),
+            });
+
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                throw new Error((body as { message?: string })?.message || 'Failed to save class name');
+            }
+
+            onSaved?.();
+            onClose();
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            alert(message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <BaseModal
+            isOpen={isOpen}
+            onClose={onClose}
+            title="Edit Class Name"
+            onSubmit={handleSubmit}
+            submitDisabled={saving || !name.trim()}
+            submitLabel={saving ? 'Saving...' : 'Save'}
+        >
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Class Name</label>
+                <input
+                    type="text"
+                    className={styles.input}
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                />
+            </div>
+        </BaseModal>
+    );
+}
+
+interface EditClassDescriptionModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+    classId: string;
+    defaultShortDescription?: string | null;
+    onSaved?: () => void;
+}
+
+export function EditClassDescriptionModal({
+    isOpen,
+    onClose,
+    classId,
+    defaultShortDescription,
+    onSaved,
+}: EditClassDescriptionModalProps) {
+    const [shortDescription, setShortDescription] = useState(defaultShortDescription ?? '');
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        setShortDescription(defaultShortDescription ?? '');
+    }, [isOpen, defaultShortDescription]);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        if (!token) {
+            alert('You are not logged in.');
+            return;
+        }
+
+        const trimmed = shortDescription.trim();
+        if (!trimmed) return;
+
+        setSaving(true);
+        try {
+            const res = await fetch(`${API_BASE_URL}/classes/${classId}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ short_description: trimmed }),
+            });
+
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                throw new Error((body as { message?: string })?.message || 'Failed to save short description');
+            }
+
+            onSaved?.();
+            onClose();
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            alert(message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <BaseModal
+            isOpen={isOpen}
+            onClose={onClose}
+            title="Edit Short Description"
+            onSubmit={handleSubmit}
+            submitDisabled={saving || !shortDescription.trim()}
+            submitLabel={saving ? 'Saving...' : 'Save'}
+        >
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Short Description</label>
+                <textarea
+                    className={styles.input}
+                    rows={2}
+                    required
+                    value={shortDescription}
+                    onChange={(e) => setShortDescription(e.target.value)}
+                    style={{ resize: 'vertical' }}
+                />
+            </div>
+        </BaseModal>
+    );
+}
+
+interface EditClassScheduleModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+    classId: string;
+    defaultSchedule?: WeeklyScheduleEntry[] | null;
+    onSaved?: () => void;
+}
+
+export function EditClassScheduleModal({
+    isOpen,
+    onClose,
+    classId,
+    defaultSchedule,
+    onSaved,
+}: EditClassScheduleModalProps) {
+    const [weeklySchedule, setWeeklySchedule] = useState<WeeklyScheduleEntry[]>(mergeScheduleWithDefaults(defaultSchedule ?? undefined));
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        setWeeklySchedule(mergeScheduleWithDefaults(defaultSchedule ?? undefined));
+    }, [isOpen, defaultSchedule]);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        if (!token) {
+            alert('You are not logged in.');
+            return;
+        }
+
+        if (!isScheduleValid(weeklySchedule)) return;
+
+        setSaving(true);
+        try {
+            const res = await fetch(`${API_BASE_URL}/classes/${classId}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ schedule: normalizeScheduleForSave(weeklySchedule) }),
+            });
+
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                throw new Error((body as { message?: string })?.message || 'Failed to save schedule');
+            }
+
+            onSaved?.();
+            onClose();
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            alert(message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <BaseModal
+            isOpen={isOpen}
+            onClose={onClose}
+            title="Edit Schedule"
+            onSubmit={handleSubmit}
+            submitDisabled={saving || !isScheduleValid(weeklySchedule)}
+            submitLabel={saving ? 'Saving...' : 'Save'}
+        >
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Weekly Schedule</label>
+                <div className={styles.scheduleTable}>
+                    {WEEK_DAYS.map((d) => {
+                        const entry = weeklySchedule.find((e) => e.day_of_week === d.day) ?? {
+                            day_of_week: d.day,
+                            is_off: true,
+                            start_time: null,
+                            end_time: null,
+                        };
+
+                        return (
+                            <div key={d.day} className={styles.scheduleRow}>
+                                <div className={styles.scheduleDay}>{d.label}</div>
+
+                                <div className={styles.scheduleTimes}>
+                                    <input
+                                        type="time"
+                                        className={styles.input}
+                                        value={entry.start_time ?? ''}
+                                        disabled={entry.is_off}
+                                        onChange={(e) => {
+                                            const next = weeklySchedule.map((x) =>
+                                                x.day_of_week === d.day
+                                                    ? { ...x, is_off: false, start_time: e.target.value || null }
+                                                    : x,
+                                            );
+                                            setWeeklySchedule(next);
+                                        }}
+                                    />
+                                    <span className={styles.scheduleDash}>–</span>
+                                    <input
+                                        type="time"
+                                        className={styles.input}
+                                        value={entry.end_time ?? ''}
+                                        disabled={entry.is_off}
+                                        onChange={(e) => {
+                                            const next = weeklySchedule.map((x) =>
+                                                x.day_of_week === d.day
+                                                    ? { ...x, is_off: false, end_time: e.target.value || null }
+                                                    : x,
+                                            );
+                                            setWeeklySchedule(next);
+                                        }}
+                                    />
+                                </div>
+
+                                <label className={styles.scheduleOff}>
+                                    <input
+                                        type="checkbox"
+                                        checked={entry.is_off}
+                                        onChange={(e) => {
+                                            const isOff = e.target.checked;
+                                            const next = weeklySchedule.map((x) =>
+                                                x.day_of_week === d.day
+                                                    ? {
+                                                        ...x,
+                                                        is_off: isOff,
+                                                        start_time: isOff ? null : x.start_time,
+                                                        end_time: isOff ? null : x.end_time,
+                                                    }
+                                                    : x,
+                                            );
+                                            setWeeklySchedule(next);
+                                        }}
+                                    />
+                                    Off
+                                </label>
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+        </BaseModal>
+    );
+}
+
+interface EditClassThumbnailModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+    classId: string;
+    onSaved?: () => void;
+}
+
+export function EditClassCardThumbnailModal({
+    isOpen,
+    onClose,
+    classId,
+    onSaved,
+}: EditClassThumbnailModalProps) {
+    const [thumbnail, setThumbnail] = useState<File | null>(null);
+    const [cropOpen, setCropOpen] = useState(false);
+    const [cropSrc, setCropSrc] = useState<string | null>(null);
+    const [cropFileName, setCropFileName] = useState('thumbnail.jpg');
+    const [fileInputKey, setFileInputKey] = useState(0);
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        setThumbnail(null);
+        setCropOpen(false);
+        setCropSrc((prev) => {
+            if (prev) URL.revokeObjectURL(prev);
+            return null;
+        });
+        setFileInputKey((k) => k + 1);
+    }, [isOpen]);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        if (!token) {
+            alert('You are not logged in.');
+            return;
+        }
+
+        if (!thumbnail) return;
+
+        setSaving(true);
+        try {
+            const fd = new FormData();
+            fd.append('thumbnail', thumbnail);
+            const uploadRes = await fetch(`${API_BASE_URL}/classes/${classId}/thumbnail`, {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+                body: fd,
+            });
+
+            if (!uploadRes.ok) {
+                const msg = await uploadRes.text().catch(() => '');
+                throw new Error(msg || 'Failed to upload thumbnail');
+            }
+
+            onSaved?.();
+            onClose();
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            alert(message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <BaseModal
+            isOpen={isOpen}
+            onClose={onClose}
+            title="Update Card Thumbnail"
+            onSubmit={handleSubmit}
+            submitDisabled={saving || !thumbnail}
+            submitLabel={saving ? 'Uploading...' : 'Upload'}
+        >
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Card Thumbnail</label>
+                <input
+                    key={fileInputKey}
+                    type="file"
+                    className={styles.input}
+                    accept="image/*"
+                    required
+                    onChange={(e) => {
+                        const file = e.target.files?.[0] ?? null;
+                        if (!file) {
+                            setThumbnail(null);
+                            return;
+                        }
+                        if (cropSrc) URL.revokeObjectURL(cropSrc);
+                        const url = URL.createObjectURL(file);
+                        setCropFileName(file.name || 'thumbnail.jpg');
+                        setCropSrc(url);
+                        setCropOpen(true);
+                    }}
+                />
+            </div>
+
+            <CropImageModal
+                isOpen={cropOpen}
+                src={cropSrc}
+                fileName={cropFileName}
+                title="Crop Card Thumbnail"
+                outWidth={CLASS_THUMBNAIL_VIEWBOX_WIDTH}
+                outHeight={CLASS_THUMBNAIL_VIEWBOX_HEIGHT}
+                aspect={CLASS_THUMBNAIL_VIEWBOX_WIDTH / CLASS_THUMBNAIL_VIEWBOX_HEIGHT}
+                onClose={() => {
+                    if (cropSrc) URL.revokeObjectURL(cropSrc);
+                    setCropOpen(false);
+                    setCropSrc(null);
+                    setThumbnail(null);
+                    setFileInputKey((k) => k + 1);
+                }}
+                onCropped={(file) => {
+                    if (cropSrc) URL.revokeObjectURL(cropSrc);
+                    setThumbnail(file);
+                    setCropOpen(false);
+                    setCropSrc(null);
+                }}
+            />
+        </BaseModal>
+    );
+}
+
+export function EditClassBannerModal({
+    isOpen,
+    onClose,
+    classId,
+    onSaved,
+}: EditClassThumbnailModalProps) {
+    const [thumbnail, setThumbnail] = useState<File | null>(null);
+    const [cropOpen, setCropOpen] = useState(false);
+    const [cropSrc, setCropSrc] = useState<string | null>(null);
+    const [cropFileName, setCropFileName] = useState('thumbnail.jpg');
+    const [fileInputKey, setFileInputKey] = useState(0);
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        setThumbnail(null);
+        setCropOpen(false);
+        setCropSrc((prev) => {
+            if (prev) URL.revokeObjectURL(prev);
+            return null;
+        });
+        setFileInputKey((k) => k + 1);
+    }, [isOpen]);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        if (!token) {
+            alert('You are not logged in.');
+            return;
+        }
+
+        if (!thumbnail) return;
+
+        setSaving(true);
+        try {
+            const fd = new FormData();
+            fd.append('banner', thumbnail);
+            const uploadRes = await fetch(`${API_BASE_URL}/classes/${classId}/banner`, {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+                body: fd,
+            });
+
+            if (!uploadRes.ok) {
+                const msg = await uploadRes.text().catch(() => '');
+                throw new Error(msg || 'Failed to upload banner');
+            }
+
+            onSaved?.();
+            onClose();
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            alert(message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <BaseModal
+            isOpen={isOpen}
+            onClose={onClose}
+            title="Update Banner"
+            onSubmit={handleSubmit}
+            submitDisabled={saving || !thumbnail}
+            submitLabel={saving ? 'Uploading...' : 'Upload'}
+        >
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Banner Image</label>
+                <input
+                    key={fileInputKey}
+                    type="file"
+                    className={styles.input}
+                    accept="image/*"
+                    required
+                    onChange={(e) => {
+                        const file = e.target.files?.[0] ?? null;
+                        if (!file) {
+                            setThumbnail(null);
+                            return;
+                        }
+                        if (cropSrc) URL.revokeObjectURL(cropSrc);
+                        const url = URL.createObjectURL(file);
+                        setCropFileName(file.name || 'thumbnail.jpg');
+                        setCropSrc(url);
+                        setCropOpen(true);
+                    }}
+                />
+            </div>
+
+            <CropImageModal
+                isOpen={cropOpen}
+                src={cropSrc}
+                fileName={cropFileName}
+                title="Crop Banner"
+                outWidth={CLASS_BANNER_VIEWBOX_WIDTH}
+                outHeight={CLASS_BANNER_VIEWBOX_HEIGHT}
+                aspect={CLASS_BANNER_VIEWBOX_WIDTH / CLASS_BANNER_VIEWBOX_HEIGHT}
+                onClose={() => {
+                    if (cropSrc) URL.revokeObjectURL(cropSrc);
+                    setCropOpen(false);
+                    setCropSrc(null);
+                    setThumbnail(null);
+                    setFileInputKey((k) => k + 1);
+                }}
+                onCropped={(file) => {
+                    if (cropSrc) URL.revokeObjectURL(cropSrc);
+                    setThumbnail(file);
+                    setCropOpen(false);
+                    setCropSrc(null);
+                }}
+            />
         </BaseModal>
     );
 }
@@ -2443,7 +3281,7 @@ export function AddSubpartModal({ isOpen, onClose, onAdd, topicName }: AddSubpar
 interface AddSubjectMaterialModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onAdd: (data: { title: string; url: string; description?: string; thumbnailUrl?: string }) => void;
+    onAdd: (data: { title: string; url: string; description?: string; thumbnailUrl?: string; thumbnailFile?: File }) => void;
 }
 
 export function AddSubjectMaterialModal({ isOpen, onClose, onAdd }: AddSubjectMaterialModalProps) {
@@ -2451,6 +3289,24 @@ export function AddSubjectMaterialModal({ isOpen, onClose, onAdd }: AddSubjectMa
     const [url, setUrl] = useState('');
     const [description, setDescription] = useState('');
     const [thumbnailUrl, setThumbnailUrl] = useState('');
+    const [thumbnailFile, setThumbnailFile] = useState<File | null>(null);
+    const [fileInputKey, setFileInputKey] = useState(0);
+    const [cropOpen, setCropOpen] = useState(false);
+    const [cropSrc, setCropSrc] = useState<string | null>(null);
+    const [cropFileName, setCropFileName] = useState('thumbnail.jpg');
+
+    const handleClose = () => {
+        if (cropSrc) URL.revokeObjectURL(cropSrc);
+        setTitle('');
+        setUrl('');
+        setDescription('');
+        setThumbnailUrl('');
+        setThumbnailFile(null);
+        setCropOpen(false);
+        setCropSrc(null);
+        setFileInputKey((k) => k + 1);
+        onClose();
+    };
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -2459,16 +3315,13 @@ export function AddSubjectMaterialModal({ isOpen, onClose, onAdd }: AddSubjectMa
             url,
             description: description.trim() ? description : undefined,
             thumbnailUrl: thumbnailUrl.trim() ? thumbnailUrl : undefined,
+            thumbnailFile: thumbnailFile ?? undefined,
         });
-        setTitle('');
-        setUrl('');
-        setDescription('');
-        setThumbnailUrl('');
-        onClose();
+        handleClose();
     };
 
     return (
-        <BaseModal isOpen={isOpen} onClose={onClose} title="Add Subject Material" onSubmit={handleSubmit}>
+        <BaseModal isOpen={isOpen} onClose={handleClose} title="Add Subject Material" onSubmit={handleSubmit}>
             <div className={styles.inputGroup}>
                 <label className={styles.label}>Title</label>
                 <input
@@ -2514,6 +3367,55 @@ export function AddSubjectMaterialModal({ isOpen, onClose, onAdd }: AddSubjectMa
                     onChange={(e) => setThumbnailUrl(e.target.value)}
                 />
             </div>
+
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Upload Thumbnail (optional)</label>
+                <input
+                    key={fileInputKey}
+                    type="file"
+                    className={styles.input}
+                    accept="image/*"
+                    onChange={(e) => {
+                        const file = e.target.files?.[0] ?? null;
+                        if (!file) {
+                            setThumbnailFile(null);
+                            return;
+                        }
+                        if (cropSrc) URL.revokeObjectURL(cropSrc);
+                        const url = URL.createObjectURL(file);
+                        setCropFileName(file.name || 'thumbnail.jpg');
+                        setCropSrc(url);
+                        setCropOpen(true);
+                    }}
+                />
+            </div>
+
+            <CropImageModal
+                isOpen={cropOpen}
+                src={cropSrc}
+                fileName={cropFileName}
+                title="Crop Thumbnail"
+                outWidth={MATERIAL_THUMBNAIL_VIEWBOX_WIDTH}
+                outHeight={MATERIAL_THUMBNAIL_VIEWBOX_HEIGHT}
+                aspect={MATERIAL_THUMBNAIL_VIEWBOX_WIDTH / MATERIAL_THUMBNAIL_VIEWBOX_HEIGHT}
+                onClose={() => {
+                    setCropSrc((prev) => {
+                        if (prev) URL.revokeObjectURL(prev);
+                        return null;
+                    });
+                    setCropOpen(false);
+                    setThumbnailFile(null);
+                    setFileInputKey((k) => k + 1);
+                }}
+                onCropped={(file) => {
+                    setCropSrc((prev) => {
+                        if (prev) URL.revokeObjectURL(prev);
+                        return null;
+                    });
+                    setThumbnailFile(file);
+                    setCropOpen(false);
+                }}
+            />
         </BaseModal>
     );
 }

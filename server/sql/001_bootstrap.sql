@@ -51,6 +51,7 @@ create table if not exists classes (
 alter table classes add column if not exists short_description text;
 alter table classes add column if not exists class_timing text;
 alter table classes add column if not exists thumbnail_url text;
+alter table classes add column if not exists banner_url text;
 
 -- Class weekly schedule (per-day timing; days can be off)
 create table if not exists class_weekly_schedule (
@@ -128,12 +129,15 @@ create table if not exists class_subjects (
   class_id uuid not null references classes(id) on delete cascade,
   name text not null,
   slug text not null,
+  position integer not null default 0,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (class_id, slug)
 );
 
 create index if not exists idx_class_subjects_class_id on class_subjects (class_id);
+
+alter table class_subjects add column if not exists position integer not null default 0;
 
 -- Subject topics / chapters
 create table if not exists class_subject_topics (

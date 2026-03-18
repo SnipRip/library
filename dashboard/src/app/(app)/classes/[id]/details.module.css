@@ -82,6 +82,53 @@
     border: 1px solid #e2e8f0;
 }
 
+.thumbnailWrap {
+    position: relative;
+}
+
+.cardThumb {
+    width: 100%;
+    height: 160px;
+    object-fit: cover;
+    object-position: center;
+    border-radius: 0.75rem;
+    border: 1px solid #e2e8f0;
+    background: #f8fafc;
+    display: block;
+}
+
+.cardThumbPlaceholder {
+    width: 100%;
+    height: 160px;
+    border-radius: 0.75rem;
+    border: 1px dashed #e2e8f0;
+    background: #f8fafc;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #64748b;
+    font-weight: 700;
+}
+
+.bannerEditButton {
+    position: absolute;
+    top: 0.75rem;
+    right: 0.75rem;
+}
+
+.thumbnailPlaceholder {
+    width: 100%;
+    height: 260px;
+    border-radius: 0.75rem;
+    border: 1px dashed #e2e8f0;
+    background: #f8fafc;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #64748b;
+    font-weight: 700;
+}
+
 .fieldLabel {
     font-size: 0.75rem;
     color: #64748b;
@@ -244,6 +291,13 @@
 
 .iconButtonDanger:hover {
     background: #ffe4e6;
+}
+
+.editIconButton {
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: 0.5rem;
+    font-size: 0.9rem;
 }
 
 .iconButton:disabled {

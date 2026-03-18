@@ -1,12 +1,23 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element */
+
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import TopNav from '@/components/TopNav';
 import styles from './details.module.css';
 import { API_BASE_URL } from '@/lib/api';
-import { AddSubjectModal, AddSubpartModal, AddTopicModal, EditClassModal } from '@/components/modals/Modals';
+import {
+    AddSubjectModal,
+    AddSubpartModal,
+    AddTopicModal,
+    EditClassDescriptionModal,
+    EditClassModal,
+    EditClassNameModal,
+    EditClassScheduleModal,
+    EditClassBannerModal,
+} from '@/components/modals/Modals';
 
 type WeeklyScheduleEntry = {
     day_of_week: number;
@@ -42,6 +53,7 @@ type ClassRow = {
     short_description?: string | null;
     class_timing?: string | null;
     thumbnail_url?: string | null;
+    banner_url?: string | null;
     schedule?: WeeklyScheduleEntry[] | null;
     status: string;
     created_at?: string;
@@ -53,6 +65,7 @@ type SubjectRow = {
     class_id: string;
     name: string;
     slug: string;
+    position?: number;
     created_at?: string;
     updated_at?: string;
 };
@@ -208,6 +221,10 @@ export default function ClassDetailsPage() {
     const [activeTab, setActiveTab] = useState('overview');
     const [classRow, setClassRow] = useState<ClassRow | null | undefined>(undefined);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    const [isEditNameOpen, setIsEditNameOpen] = useState(false);
+    const [isEditDescriptionOpen, setIsEditDescriptionOpen] = useState(false);
+    const [isEditScheduleOpen, setIsEditScheduleOpen] = useState(false);
+    const [isEditBannerOpen, setIsEditBannerOpen] = useState(false);
     const [subjects, setSubjects] = useState<SubjectRow[] | null | undefined>(undefined);
     const [subjectsError, setSubjectsError] = useState<string | null>(null);
     const [isAddSubjectOpen, setIsAddSubjectOpen] = useState(false);
@@ -230,6 +247,12 @@ export default function ClassDetailsPage() {
     const [togglingId, setTogglingId] = useState<string | null>(null);
 
     const classId = typeof params?.id === 'string' ? params.id : undefined;
+
+    const refreshClass = () => {
+        if (!classId) return;
+        const controller = new AbortController();
+        void loadClassById(classId, controller.signal, setClassRow);
+    };
 
     const effectiveRow =
         classRow && classId && classRow.id === classId
@@ -303,6 +326,60 @@ export default function ClassDetailsPage() {
             } finally {
                 setLoadingSubjectId(null);
             }
+        }
+    };
+
+    const reorderSubjects = async (next: SubjectRow[]) => {
+        if (!classId) return;
+        const token = localStorage.getItem('token');
+        if (!token) return;
+
+        setSubjects(next);
+        try {
+            const res = await fetch(`${API_BASE_URL}/classes/${classId}/subjects/reorder`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ ids: next.map((s) => s.id) }),
+            });
+            const body = await res.json().catch(() => null);
+            if (!res.ok) throw new Error(apiErrorMessage(body, 'Failed to reorder subjects'));
+            if (Array.isArray(body)) setSubjects(body as SubjectRow[]);
+        } catch (err: unknown) {
+            alert(err instanceof Error ? err.message : String(err));
+            const controller = new AbortController();
+            setSubjects(undefined);
+            await loadSubjectsByClassId(classId, controller.signal, setSubjects, setSubjectsError);
+        }
+    };
+
+    const removeSubject = async (subject: SubjectRow) => {
+        if (!classId) return;
+        if (!confirm(`Remove subject "${subject.name}"?`)) return;
+        const token = localStorage.getItem('token');
+        if (!token) return;
+
+        try {
+            const res = await fetch(`${API_BASE_URL}/classes/${classId}/subjects/${subject.id}`, {
+                method: 'DELETE',
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok && res.status !== 204) {
+                const body = await res.json().catch(() => null);
+                throw new Error(apiErrorMessage(body, 'Failed to remove subject'));
+            }
+
+            setSubjects((prev) => (Array.isArray(prev) ? prev.filter((s) => s.id !== subject.id) : prev));
+            setTopicsBySubject((prev) => {
+                const next = { ...prev };
+                delete next[subject.id];
+                return next;
+            });
+            if (openSubjectId === subject.id) setOpenSubjectId(null);
+        } catch (err: unknown) {
+            alert(err instanceof Error ? err.message : String(err));
         }
     };
 
@@ -565,19 +642,44 @@ export default function ClassDetailsPage() {
             />
 
             {effectiveRow && effectiveRow !== null ? (
-                <EditClassModal
-                    isOpen={isSettingsOpen}
-                    onClose={() => setIsSettingsOpen(false)}
-                    classId={effectiveRow.id}
-                    defaultName={effectiveRow.name}
-                    defaultShortDescription={effectiveRow.short_description ?? ''}
-                    defaultSchedule={effectiveRow.schedule ?? null}
-                    onSaved={() => {
-                        if (!classId) return;
-                        const controller = new AbortController();
-                        void loadClassById(classId, controller.signal, setClassRow);
-                    }}
-                />
+                <>
+                    <EditClassModal
+                        isOpen={isSettingsOpen}
+                        onClose={() => setIsSettingsOpen(false)}
+                        classId={effectiveRow.id}
+                        defaultName={effectiveRow.name}
+                        defaultShortDescription={effectiveRow.short_description ?? ''}
+                        defaultSchedule={effectiveRow.schedule ?? null}
+                        onSaved={refreshClass}
+                    />
+                    <EditClassNameModal
+                        isOpen={isEditNameOpen}
+                        onClose={() => setIsEditNameOpen(false)}
+                        classId={effectiveRow.id}
+                        defaultName={effectiveRow.name}
+                        onSaved={refreshClass}
+                    />
+                    <EditClassDescriptionModal
+                        isOpen={isEditDescriptionOpen}
+                        onClose={() => setIsEditDescriptionOpen(false)}
+                        classId={effectiveRow.id}
+                        defaultShortDescription={effectiveRow.short_description ?? ''}
+                        onSaved={refreshClass}
+                    />
+                    <EditClassScheduleModal
+                        isOpen={isEditScheduleOpen}
+                        onClose={() => setIsEditScheduleOpen(false)}
+                        classId={effectiveRow.id}
+                        defaultSchedule={effectiveRow.schedule ?? null}
+                        onSaved={refreshClass}
+                    />
+                    <EditClassBannerModal
+                        isOpen={isEditBannerOpen}
+                        onClose={() => setIsEditBannerOpen(false)}
+                        classId={effectiveRow.id}
+                        onSaved={refreshClass}
+                    />
+                </>
             ) : null}
 
             <div className={styles.container}>
@@ -585,9 +687,22 @@ export default function ClassDetailsPage() {
                 <div className={styles.header}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                         <div>
-                            <h1 className={styles.title}>
-                                {effectiveRow === undefined ? 'Loading…' : effectiveRow === null ? 'Class not found' : effectiveRow.name}
-                            </h1>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <h1 className={styles.title} style={{ margin: 0 }}>
+                                    {effectiveRow === undefined ? 'Loading…' : effectiveRow === null ? 'Class not found' : effectiveRow.name}
+                                </h1>
+                                {effectiveRow && effectiveRow !== null ? (
+                                    <button
+                                        type="button"
+                                        className={`${styles.iconButton} ${styles.editIconButton}`}
+                                        onClick={() => setIsEditNameOpen(true)}
+                                        aria-label="Edit class name"
+                                        title="Edit class"
+                                    >
+                                        ✎
+                                    </button>
+                                ) : null}
+                            </div>
                             {effectiveRow && (
                                 <div className={styles.subtitle}>
                                     <span>Status: {effectiveRow.status}</span>
@@ -626,20 +741,45 @@ export default function ClassDetailsPage() {
 
                     {activeTab === 'overview' && (
                         <div className={styles.section}>
-                            <h2 className={styles.sectionTitle}>Class Overview</h2>
+                            <div className={styles.sectionTitle}>
+                                <span>Class Overview</span>
+                            </div>
                             {effectiveRow ? (
                                 <div className={styles.overviewGrid}>
-                                    {effectiveRow.thumbnail_url ? (
-                                        <img
-                                            src={`${API_BASE_URL}${effectiveRow.thumbnail_url}`}
-                                            alt={`${effectiveRow.name} thumbnail`}
-                                            className={styles.thumbnail}
-                                        />
-                                    ) : null}
+                                    <div className={styles.thumbnailWrap}>
+                                        {effectiveRow.banner_url ? (
+                                            <img
+                                                src={`${API_BASE_URL}${effectiveRow.banner_url}`}
+                                                alt={`${effectiveRow.name} banner`}
+                                                className={styles.thumbnail}
+                                            />
+                                        ) : (
+                                            <div className={styles.thumbnailPlaceholder}>No banner</div>
+                                        )}
+
+                                        <button
+                                            type="button"
+                                            className={`${styles.iconButton} ${styles.editIconButton} ${styles.bannerEditButton}`}
+                                            onClick={() => setIsEditBannerOpen(true)}
+                                            aria-label="Edit banner"
+                                            title="Edit banner"
+                                        >
+                                            ✎
+                                        </button>
+                                    </div>
 
                                     <div>
-                                        <div className={styles.fieldLabel}>
-                                            Short Description
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
+                                            <div className={styles.fieldLabel}>Short Description</div>
+                                            <button
+                                                type="button"
+                                                className={`${styles.iconButton} ${styles.editIconButton}`}
+                                                onClick={() => setIsEditDescriptionOpen(true)}
+                                                aria-label="Edit short description"
+                                                title="Edit"
+                                            >
+                                                ✎
+                                            </button>
                                         </div>
                                         <div className={styles.fieldValue}>
                                             {effectiveRow.short_description || '-'}
@@ -647,8 +787,17 @@ export default function ClassDetailsPage() {
                                     </div>
 
                                     <div>
-                                        <div className={styles.fieldLabel}>
-                                            Schedule
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
+                                            <div className={styles.fieldLabel}>Schedule</div>
+                                            <button
+                                                type="button"
+                                                className={`${styles.iconButton} ${styles.editIconButton}`}
+                                                onClick={() => setIsEditScheduleOpen(true)}
+                                                aria-label="Edit schedule"
+                                                title="Edit"
+                                            >
+                                                ✎
+                                            </button>
                                         </div>
                                         <div className={styles.fieldValue}>
                                             {scheduleSummary(effectiveRow.schedule) || '-'}
@@ -667,6 +816,17 @@ export default function ClassDetailsPage() {
                         <div className={styles.section}>
                             <div className={styles.sectionTitle}>
                                 <span>Weekly Schedule</span>
+                                {effectiveRow ? (
+                                    <button
+                                        type="button"
+                                        className={`${styles.iconButton} ${styles.editIconButton}`}
+                                        onClick={() => setIsEditScheduleOpen(true)}
+                                        aria-label="Edit weekly schedule"
+                                        title="Edit"
+                                    >
+                                        ✎
+                                    </button>
+                                ) : null}
                             </div>
                             {effectiveRow && (effectiveRow.schedule?.length ?? 0) > 0 ? (
                                 <div className={styles.routineGrid}>
@@ -743,7 +903,7 @@ export default function ClassDetailsPage() {
                                 <p style={{ lineHeight: 1.6 }}>No subjects configured yet.</p>
                             ) : (
                                 <div>
-                                    {subjects.map((s) => (
+                                    {subjects.map((s, sIdx) => (
                                         <div key={s.id} className={styles.subjectAccordion}>
                                             <div className={styles.subjectHeader} onClick={() => void toggleSubject(s)}>
                                                 <span style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
@@ -758,7 +918,46 @@ export default function ClassDetailsPage() {
                                                         </Link>
                                                     ) : null}
                                                 </span>
-                                                <span className={styles.chevron}>{openSubjectId === s.id ? '▾' : '▸'}</span>
+                                                <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                                    <span className={styles.rowActions}>
+                                                        <button
+                                                            type="button"
+                                                            className={styles.iconButton}
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                void reorderSubjects(moveItem(subjects, sIdx, sIdx - 1));
+                                                            }}
+                                                            disabled={sIdx === 0}
+                                                            aria-label="Move subject up"
+                                                        >
+                                                            ↑
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            className={styles.iconButton}
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                void reorderSubjects(moveItem(subjects, sIdx, sIdx + 1));
+                                                            }}
+                                                            disabled={sIdx === subjects.length - 1}
+                                                            aria-label="Move subject down"
+                                                        >
+                                                            ↓
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            className={`${styles.iconButton} ${styles.iconButtonDanger}`}
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                void removeSubject(s);
+                                                            }}
+                                                            aria-label="Remove subject"
+                                                        >
+                                                            ✕
+                                                        </button>
+                                                    </span>
+                                                    <span className={styles.chevron}>{openSubjectId === s.id ? '▾' : '▸'}</span>
+                                                </span>
                                             </div>
 
                                             {openSubjectId === s.id ? (

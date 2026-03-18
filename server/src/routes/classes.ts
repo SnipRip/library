@@ -154,8 +154,10 @@ export async function registerClassRoutes(app: FastifyInstance) {
          c.short_description,
          c.class_timing,
          c.thumbnail_url,
+         c.banner_url,
          c.status,
          c.created_at,
+         c.updated_at,
          coalesce(
            (
              select json_agg(
@@ -191,6 +193,7 @@ export async function registerClassRoutes(app: FastifyInstance) {
          c.short_description,
          c.class_timing,
          c.thumbnail_url,
+         c.banner_url,
          c.status,
          c.created_at,
          c.updated_at,
@@ -232,10 +235,10 @@ export async function registerClassRoutes(app: FastifyInstance) {
     if (!existing.rows[0]) return reply.code(404).send({ message: "Not found" });
 
     const result = await pool.query(
-      `select id, class_id, name, slug, created_at, updated_at
+      `select id, class_id, name, slug, position, created_at, updated_at
        from class_subjects
        where class_id = $1
-       order by created_at asc`,
+       order by position asc, created_at asc`,
       [id],
     );
 
@@ -250,7 +253,7 @@ export async function registerClassRoutes(app: FastifyInstance) {
     const { id, subjectId } = req.params as { id: string; subjectId: string };
 
     const result = await pool.query(
-      `select id, class_id, name, slug, created_at, updated_at
+      `select id, class_id, name, slug, position, created_at, updated_at
        from class_subjects
        where class_id = $1 and id = $2
        limit 1`,
@@ -303,14 +306,91 @@ export async function registerClassRoutes(app: FastifyInstance) {
       slug = `${base}-${maxSuffix + 1}`;
     }
 
+    const nextPosRes = await pool.query(
+      `select coalesce(max(position), -1) as max_pos
+       from class_subjects
+       where class_id = $1`,
+      [id],
+    );
+    const nextPosition = Number(nextPosRes.rows[0]?.max_pos ?? -1) + 1;
+
     const created = await pool.query(
-      `insert into class_subjects (class_id, name, slug)
-       values ($1, $2, $3)
-       returning id, class_id, name, slug, created_at, updated_at`,
-      [id, name, slug],
+      `insert into class_subjects (class_id, name, slug, position)
+       values ($1, $2, $3, $4)
+       returning id, class_id, name, slug, position, created_at, updated_at`,
+      [id, name, slug, nextPosition],
     );
 
     return reply.code(201).send(created.rows[0]);
+  });
+
+  app.delete("/classes/:id/subjects/:subjectId", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const pool = getPool();
+    const { id, subjectId } = req.params as { id: string; subjectId: string };
+
+    const existing = await pool.query(
+      `select id from class_subjects where class_id = $1 and id = $2 limit 1`,
+      [id, subjectId],
+    );
+    if (!existing.rows[0]) return reply.code(404).send({ message: "Not found" });
+
+    await pool.query(`delete from class_subjects where id = $1`, [subjectId]);
+    return reply.code(204).send();
+  });
+
+  app.patch("/classes/:id/subjects/reorder", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const parsed = ReorderIdsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ message: "Invalid body", errors: parsed.error.issues });
+    }
+
+    const pool = getPool();
+    const { id } = req.params as { id: string };
+    const ids = parsed.data.ids;
+
+    const found = await pool.query(
+      `select id from class_subjects where class_id = $1 and id = any($2::uuid[])`,
+      [id, ids],
+    );
+    if (found.rowCount !== ids.length) {
+      return reply.code(400).send({ message: "Some subjects do not belong to this class" });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query("begin");
+      for (let i = 0; i < ids.length; i++) {
+        await client.query(
+          `update class_subjects
+           set position = $2,
+               updated_at = now()
+           where id = $1`,
+          [ids[i], i],
+        );
+      }
+      await client.query("commit");
+    } catch (err) {
+      await client.query("rollback");
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    const result = await pool.query(
+      `select id, class_id, name, slug, position, created_at, updated_at
+       from class_subjects
+       where class_id = $1
+       order by position asc, created_at asc`,
+      [id],
+    );
+
+    return reply.send(result.rows);
   });
 
   app.get("/classes/:id/subjects/:subjectId/topics", async (req, reply) => {
@@ -747,6 +827,61 @@ export async function registerClassRoutes(app: FastifyInstance) {
     return reply.code(201).send(created.rows[0]);
   });
 
+  app.post("/classes/:id/subjects/:subjectId/materials/:materialId/thumbnail", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const { id, subjectId, materialId } = req.params as { id: string; subjectId: string; materialId: string };
+
+    const pool = getPool();
+    const existing = await pool.query(
+      `select m.id
+       from class_subject_materials m
+       join class_subjects s on s.id = m.subject_id
+       where s.class_id = $1 and s.id = $2 and m.id = $3
+       limit 1`,
+      [id, subjectId, materialId],
+    );
+    if (!existing.rows[0]) return reply.code(404).send({ message: "Not found" });
+
+    const file = await (req as any).file();
+    if (!file) return reply.code(400).send({ message: "thumbnail file is required" });
+
+    const mime = String(file.mimetype || "");
+    if (!mime.toLowerCase().startsWith("image/")) {
+      return reply.code(400).send({ message: "Only image uploads are allowed" });
+    }
+
+    const ext = extFromMime(mime);
+    if (!ext) {
+      return reply.code(400).send({ message: "Unsupported image type (use jpg/png/webp)" });
+    }
+
+    const dir = path.join(uploadsRoot(), "materials", materialId);
+    await fs.mkdir(dir, { recursive: true });
+    const filename = `thumbnail.${ext}`;
+    const filePath = path.join(dir, filename);
+
+    const handle = await fs.open(filePath, "w");
+    try {
+      await pipeline(file.file, handle.createWriteStream());
+    } finally {
+      await handle.close();
+    }
+
+    const publicPath = `/uploads/materials/${materialId}/${filename}`;
+    const saved = await pool.query(
+      `update class_subject_materials
+       set thumbnail_url = $2,
+           updated_at = now()
+       where id = $1
+       returning id, thumbnail_url`,
+      [materialId, publicPath],
+    );
+
+    return reply.code(201).send(saved.rows[0]);
+  });
+
   app.post("/classes", async (req, reply) => {
     const auth = await requireAuth(req);
     if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
@@ -766,7 +901,7 @@ export async function registerClassRoutes(app: FastifyInstance) {
       const result = await client.query(
         `insert into classes (name, short_description, class_timing, status)
          values ($1, $2, $3, $4)
-         returning id, name, short_description, class_timing, thumbnail_url, status, created_at, updated_at`,
+         returning id, name, short_description, class_timing, thumbnail_url, banner_url, status, created_at, updated_at`,
         [name, short_description ?? null, class_timing ?? null, status],
       );
 
@@ -802,6 +937,7 @@ export async function registerClassRoutes(app: FastifyInstance) {
            c.short_description,
            c.class_timing,
            c.thumbnail_url,
+           c.banner_url,
            c.status,
            c.created_at,
            c.updated_at,
@@ -910,6 +1046,7 @@ export async function registerClassRoutes(app: FastifyInstance) {
            c.short_description,
            c.class_timing,
            c.thumbnail_url,
+           c.banner_url,
            c.status,
            c.created_at,
            c.updated_at,
@@ -987,6 +1124,54 @@ export async function registerClassRoutes(app: FastifyInstance) {
            updated_at = now()
        where id = $1
        returning id, thumbnail_url`,
+      [id, publicPath],
+    );
+
+    return reply.code(201).send(saved.rows[0]);
+  });
+
+  app.post("/classes/:id/banner", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const { id } = req.params as { id: string };
+
+    const pool = getPool();
+    const existing = await pool.query(`select id from classes where id = $1 limit 1`, [id]);
+    if (!existing.rows[0]) return reply.code(404).send({ message: "Not found" });
+
+    const file = await (req as any).file();
+    if (!file) return reply.code(400).send({ message: "banner file is required" });
+
+    const mime = String(file.mimetype || "");
+    if (!mime.toLowerCase().startsWith("image/")) {
+      return reply.code(400).send({ message: "Only image uploads are allowed" });
+    }
+
+    const ext = extFromMime(mime);
+    if (!ext) {
+      return reply.code(400).send({ message: "Unsupported image type (use jpg/png/webp)" });
+    }
+
+    const dir = path.join(uploadsRoot(), "classes", id);
+    await fs.mkdir(dir, { recursive: true });
+    const filename = `banner.${ext}`;
+    const filePath = path.join(dir, filename);
+
+    const handle = await fs.open(filePath, "w");
+    try {
+      await pipeline(file.file, handle.createWriteStream());
+    } finally {
+      await handle.close();
+    }
+
+    const publicPath = `/uploads/classes/${id}/${filename}`;
+    const saved = await pool.query(
+      `update classes
+       set banner_url = $2,
+           updated_at = now()
+       where id = $1
+       returning id, banner_url`,
       [id, publicPath],
     );
 

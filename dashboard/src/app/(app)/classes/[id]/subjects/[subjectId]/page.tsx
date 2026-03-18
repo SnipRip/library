@@ -24,6 +24,14 @@ type MaterialRow = {
     created_at?: string;
 };
 
+function resolveThumbSrc(url: string): string {
+    const u = (url || '').trim();
+    if (!u) return '';
+    if (u.startsWith('http://') || u.startsWith('https://') || u.startsWith('data:') || u.startsWith('blob:')) return u;
+    if (u.startsWith('/')) return `${API_BASE_URL}${u}`;
+    return u;
+}
+
 function safeMessage(body: unknown, fallback: string): string {
     if (body && typeof body === 'object') {
         const m = (body as { message?: unknown }).message;
@@ -46,7 +54,7 @@ export default function SubjectMaterialsPage() {
     const subjectId = useMemo(() => (typeof params?.subjectId === 'string' ? params.subjectId : ''), [params]);
 
     const [subject, setSubject] = useState<SubjectRow | null | undefined>(undefined);
-    const [materials, setMaterials] = useState<MaterialRow[] | null | undefined>(undefined);
+    const [materials, setMaterials] = useState<MaterialRow[] | undefined>(undefined);
     const [error, setError] = useState<string | null>(null);
     const [isAddOpen, setIsAddOpen] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -94,7 +102,7 @@ export default function SubjectMaterialsPage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [classId, subjectId]);
 
-    const addMaterial = async (data: { title: string; url: string; description?: string; thumbnailUrl?: string }) => {
+    const addMaterial = async (data: { title: string; url: string; description?: string; thumbnailUrl?: string; thumbnailFile?: File }) => {
         const token = localStorage.getItem('token');
         if (!token) {
             alert('Please login again');
@@ -113,11 +121,29 @@ export default function SubjectMaterialsPage() {
                     title: data.title,
                     url: data.url,
                     description: data.description ?? null,
-                    thumbnail_url: data.thumbnailUrl ?? null,
+                    thumbnail_url: data.thumbnailFile ? null : (data.thumbnailUrl ?? null),
                 }),
             });
-            const body = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(safeMessage(body, 'Failed to add material'));
+            const created = await res.json().catch(() => null);
+            if (!res.ok) throw new Error(safeMessage(created, 'Failed to add material'));
+
+            const createdId = (created as { id?: string } | null)?.id;
+            if (data.thumbnailFile && createdId) {
+                const fd = new FormData();
+                fd.append('thumbnail', data.thumbnailFile);
+                const uploadRes = await fetch(`${API_BASE_URL}/classes/${classId}/subjects/${subjectId}/materials/${createdId}/thumbnail`, {
+                    method: 'POST',
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                    },
+                    body: fd,
+                });
+
+                if (!uploadRes.ok) {
+                    const msg = await uploadRes.text().catch(() => '');
+                    throw new Error(msg || 'Failed to upload thumbnail');
+                }
+            }
 
             const controller = new AbortController();
             await loadAll(controller.signal);
@@ -180,7 +206,7 @@ export default function SubjectMaterialsPage() {
                                 <div className={styles.thumb}>
                                     {m.thumbnail_url ? (
                                         // eslint-disable-next-line @next/next/no-img-element
-                                        <img src={m.thumbnail_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                        <img src={resolveThumbSrc(m.thumbnail_url)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                     ) : (
                                         <div className={styles.thumbText}>
                                             {guessKind(m.url)}

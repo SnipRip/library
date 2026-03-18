@@ -1,10 +1,12 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element */
+
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import TopNav from '@/components/TopNav';
 import styles from './classes.module.css';
-import { AddBatchModal } from '@/components/modals/Modals';
+import { AddBatchModal, EditClassCardThumbnailModal } from '@/components/modals/Modals';
 import { API_BASE_URL } from '@/lib/api';
 
 type WeeklyScheduleEntry = {
@@ -33,10 +35,14 @@ type ClassRow = {
     short_description?: string | null;
     schedule?: WeeklyScheduleEntry[] | null;
     thumbnail_url?: string | null;
+    updated_at?: string | null;
     status: string;
 };
 
-async function loadClasses(setClasses: React.Dispatch<React.SetStateAction<ClassRow[] | null>>) {
+async function loadClasses(
+    setClasses: React.Dispatch<React.SetStateAction<ClassRow[] | null>>,
+    bumpImageVersion?: () => void,
+) {
     try {
         const token = localStorage.getItem('token');
         if (!token) {
@@ -53,6 +59,7 @@ async function loadClasses(setClasses: React.Dispatch<React.SetStateAction<Class
         }
         const body = await res.json();
         setClasses(Array.isArray(body) ? body : []);
+        bumpImageVersion?.();
     } catch {
         setClasses([]);
     }
@@ -61,9 +68,13 @@ async function loadClasses(setClasses: React.Dispatch<React.SetStateAction<Class
 export default function ClassesPage() {
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [classes, setClasses] = useState<ClassRow[] | null>(null);
+    const [editingThumbClassId, setEditingThumbClassId] = useState<string | null>(null);
+    const [imageVersion, setImageVersion] = useState(0);
+
+    const bumpImageVersion = () => setImageVersion(Date.now());
 
     useEffect(() => {
-        void loadClasses(setClasses);
+        void loadClasses(setClasses, bumpImageVersion);
     }, []);
 
     return (
@@ -85,7 +96,17 @@ export default function ClassesPage() {
                     onClose={() => setIsAddModalOpen(false)}
                     onCreated={() => {
                         setClasses(null);
-                        void loadClasses(setClasses);
+                        void loadClasses(setClasses, bumpImageVersion);
+                    }}
+                />
+
+                <EditClassCardThumbnailModal
+                    isOpen={Boolean(editingThumbClassId)}
+                    onClose={() => setEditingThumbClassId(null)}
+                    classId={editingThumbClassId ?? ''}
+                    onSaved={() => {
+                        setClasses(null);
+                        void loadClasses(setClasses, bumpImageVersion);
                     }}
                 />
 
@@ -98,15 +119,31 @@ export default function ClassesPage() {
                         classes.map((cls) => (
                             <Link href={`/classes/${cls.id}`} key={cls.id} style={{ textDecoration: 'none' }}>
                                 <div className={styles.card} suppressHydrationWarning>
-                                    {cls.thumbnail_url ? (
-                                        <img
-                                            src={`${API_BASE_URL}${cls.thumbnail_url}`}
-                                            alt={`${cls.name} thumbnail`}
-                                            className={styles.thumbnail}
-                                        />
-                                    ) : (
-                                        <div className={styles.thumbnailPlaceholder}>No thumbnail</div>
-                                    )}
+                                    <div className={styles.thumbnailWrap}>
+                                        {cls.thumbnail_url ? (
+                                            <img
+                                                src={`${API_BASE_URL}${cls.thumbnail_url}?v=${encodeURIComponent(cls.updated_at ?? String(imageVersion))}`}
+                                                alt={`${cls.name} thumbnail`}
+                                                className={styles.thumbnail}
+                                            />
+                                        ) : (
+                                            <div className={styles.thumbnailPlaceholder}>No thumbnail</div>
+                                        )}
+
+                                        <button
+                                            type="button"
+                                            className={styles.thumbEditButton}
+                                            onClick={(e) => {
+                                                e.preventDefault();
+                                                e.stopPropagation();
+                                                setEditingThumbClassId(cls.id);
+                                            }}
+                                            aria-label="Edit class thumbnail"
+                                            title="Edit thumbnail"
+                                        >
+                                            ✎
+                                        </button>
+                                    </div>
 
                                     <div className={styles.cardHeader} suppressHydrationWarning>
                                         <h3 style={{ fontSize: '1.25rem' }}>{cls.name}</h3>
