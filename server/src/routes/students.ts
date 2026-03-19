@@ -38,6 +38,148 @@ export async function registerStudentRoutes(app: FastifyInstance) {
     return reply.send(result.rows);
   });
 
+  app.get("/students/:id/billing-items", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const { id } = req.params as { id: string };
+    const pool = getPool();
+
+    const studentRes = await pool.query(
+      `select id, full_name, phone
+       from students
+       where id = $1
+       limit 1`,
+      [id],
+    );
+    const student = studentRes.rows[0] as { id: string; full_name: string; phone: string } | undefined;
+    if (!student) return reply.code(404).send({ message: "Student not found" });
+
+    const items: Array<{
+      id: string;
+      desc: string;
+      qty: number;
+      price: number;
+      kind: "library" | "reserved_seat" | "locker" | "class";
+    }> = [];
+
+    // Library memberships (active; include upcoming reservations too)
+    const membershipsRes = await pool.query(
+      `select
+        m.id as membership_id,
+        sh.name as shift_name,
+        ty.name as seat_type_name,
+        m.start_date,
+        m.end_date,
+        m.reserved_seat_id,
+        s.seat_number as reserved_seat_number,
+        m.reserved_fee,
+        coalesce(p.monthly_fee, sh.monthly_fee, 0) as monthly_fee
+      from library_memberships m
+      join library_shifts sh on sh.id = m.shift_id
+      join library_seat_types ty on ty.id = m.seat_type_id
+      left join library_seats s on s.id = m.reserved_seat_id
+      left join library_shift_pricing p on p.shift_id = m.shift_id and p.seat_type_id = m.seat_type_id
+      where m.student_id = $1
+        and m.status = 'active'
+        and (m.end_date is null or m.end_date >= current_date)
+      order by m.created_at desc`,
+      [id],
+    );
+
+    for (const row of membershipsRes.rows as Array<{
+      membership_id: string;
+      shift_name: string;
+      seat_type_name: string;
+      start_date: string;
+      end_date: string | null;
+      reserved_seat_id: string | null;
+      reserved_seat_number: string | null;
+      reserved_fee: number | null;
+      monthly_fee: number | null;
+    }>) {
+      const monthlyFee = typeof row.monthly_fee === "number" && Number.isFinite(row.monthly_fee) ? row.monthly_fee : 0;
+      items.push({
+        id: `lib:${row.membership_id}:monthly`,
+        kind: "library",
+        desc: `Library Fee - ${row.shift_name} (${row.seat_type_name})`,
+        qty: 1,
+        price: monthlyFee,
+      });
+
+      if (row.reserved_seat_id) {
+        const reservedFee =
+          typeof row.reserved_fee === "number" && Number.isFinite(row.reserved_fee) ? row.reserved_fee : 0;
+        const seatNo = row.reserved_seat_number ? `Seat ${row.reserved_seat_number}` : "Reserved Seat";
+        items.push({
+          id: `lib:${row.membership_id}:reserved`,
+          kind: "reserved_seat",
+          desc: `Reserved Seat Fee - ${seatNo} (${row.shift_name})`,
+          qty: 1,
+          price: reservedFee,
+        });
+      }
+    }
+
+    // Locker assignment (active)
+    const lockerRes = await pool.query(
+      `select
+        a.id as assignment_id,
+        a.locker_number,
+        s.monthly_fee
+       from library_locker_assignments a
+       cross join (
+         select monthly_fee
+         from library_locker_settings
+         order by created_at asc
+         limit 1
+       ) s
+       where a.student_id = $1
+         and a.status = 'active'
+         and a.end_date is null
+       order by a.created_at desc
+       limit 1`,
+      [id],
+    );
+    const locker = lockerRes.rows[0] as
+      | { assignment_id: string; locker_number: number; monthly_fee: number }
+      | undefined;
+    if (locker) {
+      const lockerFee = typeof locker.monthly_fee === "number" && Number.isFinite(locker.monthly_fee) ? locker.monthly_fee : 0;
+      items.push({
+        id: `locker:${locker.assignment_id}`,
+        kind: "locker",
+        desc: `Locker Fee - Locker #${locker.locker_number}`,
+        qty: 1,
+        price: lockerFee,
+      });
+    }
+
+    // Class enrollments (active)
+    const enrollRes = await pool.query(
+      `select e.id as enrollment_id, c.name as class_name
+       from class_enrollments e
+       join classes c on c.id = e.class_id
+       where e.student_id = $1
+         and e.status = 'active'
+         and e.end_date is null
+       order by e.created_at desc`,
+      [id],
+    );
+
+    for (const row of enrollRes.rows as Array<{ enrollment_id: string; class_name: string }>) {
+      items.push({
+        id: `class:${row.enrollment_id}`,
+        kind: "class",
+        desc: `Class Fee - ${row.class_name}`,
+        qty: 1,
+        price: 0,
+      });
+    }
+
+    return reply.send({ student, items });
+  });
+
   app.post("/students", async (req, reply) => {
     const auth = await requireAuth(req);
     if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });

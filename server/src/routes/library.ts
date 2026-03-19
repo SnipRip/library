@@ -70,6 +70,12 @@ const CreateMembershipSchema = z.object({
   reserved_fee: z.number().int().nonnegative().nullable().optional(),
 });
 
+const UpdateMembershipSchema = z
+  .object({
+    end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: "At least one field is required" });
+
 const CreateCheckinSchema = z.object({
   membership_id: z.string().uuid(),
   seat_id: z.string().uuid(),
@@ -115,11 +121,20 @@ function computeShiftEndAt(now: Date, startHHMM: string, endHHMM: string) {
   return end;
 }
 
-function isActiveOnDateRangeSql(dateParamName: string) {
-  // Uses $<dateParamName> as the comparison date.
-  return `status = 'active'
-    and start_date <= ${dateParamName}
-    and (end_date is null or end_date >= ${dateParamName})`;
+function isActiveOnDateRangeSql(dateExpr: string, tableAlias = "m") {
+  // Uses dateExpr as the comparison date.
+  // Qualify with table alias to avoid ambiguous column refs when joining.
+  const a = tableAlias ? `${tableAlias}.` : "";
+  return `${a}status = 'active'
+    and ${a}start_date <= ${dateExpr}
+    and (${a}end_date is null or ${a}end_date >= ${dateExpr})`;
+}
+
+function isReservationBlockingSql(dateExpr: string, tableAlias = "m") {
+  // A reservation blocks the seat even if its start_date is in the future.
+  const a = tableAlias ? `${tableAlias}.` : "";
+  return `${a}status = 'active'
+    and (${a}end_date is null or ${a}end_date >= ${dateExpr})`;
 }
 
 export async function registerLibraryRoutes(app: FastifyInstance) {
@@ -506,12 +521,6 @@ export async function registerLibraryRoutes(app: FastifyInstance) {
     }
 
     // Shift-aware view: reserved seats block others even if empty.
-    const today = new Date();
-    const yyyy = today.getFullYear();
-    const mm = String(today.getMonth() + 1).padStart(2, "0");
-    const dd = String(today.getDate()).padStart(2, "0");
-    const todayStr = `${yyyy}-${mm}-${dd}`;
-
     const result = await pool.query(
       `with shift as (
         select id, start_time::text as start_time, end_time::text as end_time
@@ -519,15 +528,19 @@ export async function registerLibraryRoutes(app: FastifyInstance) {
         where id = $1
       ),
       reserved as (
-        select
+        select distinct on (m.reserved_seat_id)
           m.reserved_seat_id as seat_id,
+          m.id as membership_id,
           m.student_id,
-          st.full_name
+          st.full_name,
+          m.start_date,
+          m.end_date
         from library_memberships m
         join students st on st.id = m.student_id
         where m.shift_id = $1
           and m.reserved_seat_id is not null
-          and ${isActiveOnDateRangeSql("$2::date")}
+          and ${isReservationBlockingSql("current_date", "m")}
+        order by m.reserved_seat_id, m.start_date asc, m.created_at desc
       ),
       active_checkins as (
         select
@@ -556,13 +569,18 @@ export async function registerLibraryRoutes(app: FastifyInstance) {
           when r.seat_id is not null then 'occupied'
           else 'available'
         end as status,
-        coalesce(ac.end_at, null) as occupied_until,
+        case
+          when ac.seat_id is not null then ac.end_at::text
+          when r.seat_id is not null and r.end_date is not null then r.end_date::text
+          else null
+        end as occupied_until,
         case
           when ac.seat_id is not null then ac.full_name
           when r.seat_id is not null then (r.full_name || ' (Reserved)')
           else null
         end as occupant_name,
         (r.seat_id is not null) as is_reserved,
+        r.membership_id as reserved_membership_id,
         ac.checkin_id as active_checkin_id
       from library_seats s
       left join library_halls h on h.id = s.hall_id
@@ -570,7 +588,7 @@ export async function registerLibraryRoutes(app: FastifyInstance) {
       left join active_checkins ac on ac.seat_id = s.id
       left join reserved r on r.seat_id = s.id
       order by s.seat_number asc`,
-      [shift_id, todayStr],
+      [shift_id],
     );
 
     return reply.send(result.rows);
@@ -757,11 +775,6 @@ export async function registerLibraryRoutes(app: FastifyInstance) {
     };
 
     const pool = getPool();
-    const today = new Date();
-    const yyyy = today.getFullYear();
-    const mm = String(today.getMonth() + 1).padStart(2, "0");
-    const dd = String(today.getDate()).padStart(2, "0");
-    const todayStr = `${yyyy}-${mm}-${dd}`;
 
     const clauses: string[] = [];
     const params: Array<string> = [];
@@ -775,8 +788,7 @@ export async function registerLibraryRoutes(app: FastifyInstance) {
       clauses.push(`m.seat_type_id = $${params.length}`);
     }
     if (active === "true") {
-      params.push(todayStr);
-      clauses.push(isActiveOnDateRangeSql(`$${params.length}::date`));
+      clauses.push(isActiveOnDateRangeSql('current_date', 'm'));
     }
 
     const whereSql = clauses.length ? `where ${clauses.join(" and ")}` : "";
@@ -890,6 +902,33 @@ export async function registerLibraryRoutes(app: FastifyInstance) {
     return reply.code(201).send(result.rows[0]);
   });
 
+  app.patch("/library/memberships/:id", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const parsed = UpdateMembershipSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ message: "Invalid body", errors: parsed.error.issues });
+    }
+
+    const { id } = req.params as { id: string };
+    const { end_date } = parsed.data;
+
+    const pool = getPool();
+    const res = await pool.query(
+      `update library_memberships m
+       set end_date = $2::date,
+           updated_at = now()
+       where m.id = $1
+       returning m.id, m.shift_id, m.reserved_seat_id, m.start_date, m.end_date, m.status, m.updated_at`,
+      [id, end_date ?? null],
+    );
+
+    const row = res.rows[0];
+    if (!row) return reply.code(404).send({ message: "Membership not found" });
+    return reply.send(row);
+  });
+
   app.post("/library/checkins", async (req, reply) => {
     const auth = await requireAuth(req);
     if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
@@ -901,12 +940,6 @@ export async function registerLibraryRoutes(app: FastifyInstance) {
 
     const pool = getPool();
     const { membership_id, seat_id } = parsed.data;
-
-    const today = new Date();
-    const yyyy = today.getFullYear();
-    const mm = String(today.getMonth() + 1).padStart(2, "0");
-    const dd = String(today.getDate()).padStart(2, "0");
-    const todayStr = `${yyyy}-${mm}-${dd}`;
 
     const membershipRes = await pool.query(
       `select
@@ -920,9 +953,9 @@ export async function registerLibraryRoutes(app: FastifyInstance) {
       from library_memberships m
       join library_shifts sh on sh.id = m.shift_id
       where m.id = $1
-        and ${isActiveOnDateRangeSql("$2::date")}
+        and ${isActiveOnDateRangeSql("current_date", "m")}
       limit 1`,
-      [membership_id, todayStr],
+      [membership_id],
     );
     const membership = membershipRes.rows[0] as
       | {
@@ -964,15 +997,15 @@ export async function registerLibraryRoutes(app: FastifyInstance) {
        where m.shift_id = $1
          and m.reserved_seat_id = $2
          and m.id <> $3
-         and ${isActiveOnDateRangeSql("$4::date")}
+         and ${isReservationBlockingSql("current_date", "m")}
        limit 1`,
-      [membership.shift_id, seat_id, membership.id, todayStr],
+      [membership.shift_id, seat_id, membership.id],
     );
     if ((reservedByOther.rows?.length ?? 0) > 0) {
       return reply.code(409).send({ message: "Seat is reserved" });
     }
 
-    const endAt = computeShiftEndAt(today, membership.shift_start, membership.shift_end);
+    const endAt = computeShiftEndAt(new Date(), membership.shift_start, membership.shift_end);
 
     try {
       const res = await pool.query(

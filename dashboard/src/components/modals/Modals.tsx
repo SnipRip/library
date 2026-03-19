@@ -2868,7 +2868,7 @@ interface CreateMembershipModalProps {
     defaultShiftId?: string | null;
     defaultSeatTypeId?: string | null;
     defaultReservedSeatId?: string | null;
-    onCreated?: () => void;
+    onCreated?: (created: { shift_id: string; reserved_seat_id: string | null }) => void;
 }
 
 export function CreateMembershipModal({
@@ -2976,7 +2976,7 @@ export function CreateMembershipModal({
             if (!res.ok) throw new Error(body?.message || 'Failed to create admission');
 
             onClose();
-            onCreated?.();
+            onCreated?.({ shift_id: shiftId, reserved_seat_id: reservedSeatId || null });
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);
             alert(message);
@@ -3167,6 +3167,81 @@ export function CheckInSeatModal({ isOpen, onClose, shiftId, seatId, seatTypeId,
                         </option>
                     ))}
                 </select>
+            </div>
+        </BaseModal>
+    );
+}
+
+interface RenewMembershipModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+    membershipId: string;
+    currentEndDate?: string | null;
+    onRenewed?: () => void;
+}
+
+function addDaysISODate(days: number) {
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    return d.toISOString().split('T')[0];
+}
+
+export function RenewMembershipModal({ isOpen, onClose, membershipId, currentEndDate, onRenewed }: RenewMembershipModalProps) {
+    const [saving, setSaving] = useState(false);
+    const [endDate, setEndDate] = useState('');
+
+    useEffect(() => {
+        if (!isOpen) return;
+        setEndDate(currentEndDate || addDaysISODate(30));
+    }, [isOpen, currentEndDate]);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        if (!token) {
+            alert('You are not logged in.');
+            return;
+        }
+        if (!endDate) {
+            alert('Please select an end date');
+            return;
+        }
+
+        setSaving(true);
+        try {
+            const res = await fetch(`${API_BASE_URL}/library/memberships/${membershipId}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ end_date: endDate }),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(body?.message || 'Failed to renew');
+
+            onClose();
+            onRenewed?.();
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            alert(message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <BaseModal
+            isOpen={isOpen}
+            onClose={onClose}
+            title="Renew Seat"
+            onSubmit={handleSubmit}
+            submitDisabled={saving}
+            submitLabel={saving ? 'Saving...' : 'Save'}
+        >
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Occupied Until</label>
+                <input type="date" className={styles.input} value={endDate} onChange={(e) => setEndDate(e.target.value)} required />
             </div>
         </BaseModal>
     );

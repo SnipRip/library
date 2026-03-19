@@ -40,6 +40,35 @@ const EMPTY_COMPANY: Company = {
 };
 
 const LOCAL_KEY = 'demoCompanySettings';
+const BILLING_PREFS_KEY = 'companyBillingPrefs:v1';
+
+type BillingPrefs = {
+  gstRegistered: boolean;
+};
+
+function safeLoadBillingPrefs(): BillingPrefs | null {
+  try {
+    if (typeof window === 'undefined') return null;
+    const raw = localStorage.getItem(BILLING_PREFS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<BillingPrefs>;
+    if (typeof parsed.gstRegistered !== 'boolean') return null;
+    return { gstRegistered: parsed.gstRegistered };
+  } catch {
+    return null;
+  }
+}
+
+function safeSaveBillingPrefs(prefs: BillingPrefs) {
+  try {
+    localStorage.setItem(BILLING_PREFS_KEY, JSON.stringify(prefs));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('billingPrefsChanged'));
+    }
+  } catch {
+    // ignore
+  }
+}
 
 function isAbsoluteUrl(url: string) {
   return url.startsWith('http://') || url.startsWith('https://') || url.startsWith('blob:');
@@ -80,7 +109,11 @@ export default function CompanySettingsPage() {
   const [initialCompany, setInitialCompany] = useState<Company>(EMPTY_COMPANY);
 
   // UI-only fields (kept local so backend payload remains unchanged)
-  const [gstRegistered, setGstRegistered] = useState<boolean>(false);
+  const [gstRegistered, setGstRegistered] = useState<boolean>(() => {
+    const prefs = safeLoadBillingPrefs();
+    if (prefs) return prefs.gstRegistered;
+    return false;
+  });
   const [enableEInvoicing, setEnableEInvoicing] = useState<boolean>(false);
   const [enableTds, setEnableTds] = useState<boolean>(false);
   const [enableTcs, setEnableTcs] = useState<boolean>(false);
@@ -106,6 +139,9 @@ export default function CompanySettingsPage() {
           const next = local || EMPTY_COMPANY;
           setCompany(next);
           setInitialCompany(next);
+          // If GST preference not explicitly saved, infer from GSTIN.
+          const prefs = safeLoadBillingPrefs();
+          if (!prefs) setGstRegistered(Boolean((next.gst || '').trim()));
           setLoading(false);
           return;
         }
@@ -119,6 +155,8 @@ export default function CompanySettingsPage() {
           const next = local || EMPTY_COMPANY;
           setCompany(next);
           setInitialCompany(next);
+          const prefs = safeLoadBillingPrefs();
+          if (!prefs) setGstRegistered(Boolean((next.gst || '').trim()));
           setLoading(false);
           return;
         }
@@ -126,16 +164,24 @@ export default function CompanySettingsPage() {
         const next = { ...EMPTY_COMPANY, ...body };
         setCompany(next);
         setInitialCompany(next);
+        const prefs = safeLoadBillingPrefs();
+        if (!prefs) setGstRegistered(Boolean((next.gst || '').trim()));
       } catch {
         const local = safeLoadLocal();
         const next = local || EMPTY_COMPANY;
         setCompany(next);
         setInitialCompany(next);
+        const prefs = safeLoadBillingPrefs();
+        if (!prefs) setGstRegistered(Boolean((next.gst || '').trim()));
       } finally {
         setLoading(false);
       }
     })();
   }, [router, token]);
+
+  useEffect(() => {
+    safeSaveBillingPrefs({ gstRegistered });
+  }, [gstRegistered]);
 
   async function save(e: React.FormEvent) {
     e.preventDefault();

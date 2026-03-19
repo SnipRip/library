@@ -10,6 +10,7 @@ import {
   AddSeatTypeModal,
   CreateMembershipModal,
   CheckInSeatModal,
+  RenewMembershipModal,
   DeleteHallModal,
   EditShiftPricesModal,
   EditHallModal,
@@ -29,6 +30,7 @@ interface Seat {
   occupant_name?: string | null;
   occupied_until?: string | null;
   is_reserved?: boolean;
+  reserved_membership_id?: string | null;
   active_checkin_id?: string | null;
 }
 
@@ -129,6 +131,7 @@ export default function LibraryPage() {
   const [isSeatTypeModalOpen, setIsSeatTypeModalOpen] = useState(false);
   const [isMembershipModalOpen, setIsMembershipModalOpen] = useState(false);
   const [isCheckInModalOpen, setIsCheckInModalOpen] = useState(false);
+  const [isRenewModalOpen, setIsRenewModalOpen] = useState(false);
   const [isDeleteHallModalOpen, setIsDeleteHallModalOpen] = useState(false);
   const [isEditShiftPricesModalOpen, setIsEditShiftPricesModalOpen] = useState(false);
   const [shiftIdForPrices, setShiftIdForPrices] = useState<string | null>(null);
@@ -142,22 +145,12 @@ export default function LibraryPage() {
   const effectiveShiftId = activeShiftId ?? shifts[0]?.id ?? null;
   const hasHalls = halls.length > 0;
 
-  useEffect(() => {
-    void loadShifts(setShifts);
-    void loadHalls(setHalls);
-    void loadSeatTypes(setSeatTypes);
-    void loadSeats(setAllSeats, null);
-  }, []);
-
-  useEffect(() => {
-    void loadSeats(setSeats, effectiveShiftId);
-  }, [effectiveShiftId]);
-
-  const refreshSeats = async () => {
+  async function refreshSeats(shiftIdOverride?: string | null) {
     try {
       const token = localStorage.getItem('token');
-      const url = effectiveShiftId
-        ? `${API_BASE_URL}/library/seats?shift_id=${encodeURIComponent(effectiveShiftId)}`
+      const shiftToUse = shiftIdOverride ?? effectiveShiftId;
+      const url = shiftToUse
+        ? `${API_BASE_URL}/library/seats?shift_id=${encodeURIComponent(shiftToUse)}`
         : `${API_BASE_URL}/library/seats`;
       const res = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
@@ -171,7 +164,21 @@ export default function LibraryPage() {
     } catch (err) {
       console.error(err);
     }
-  };
+  }
+
+  useEffect(() => {
+    void loadShifts(setShifts);
+    void loadHalls(setHalls);
+    void loadSeatTypes(setSeatTypes);
+    void loadSeats(setAllSeats, null);
+  }, []);
+
+  useEffect(() => {
+    // IMPORTANT: The seat map must be shift-aware. Fetching without a shiftId
+    // can race and overwrite the correct shift-aware statuses (reserved seats).
+    if (!effectiveShiftId) return;
+    void loadSeats(setSeats, effectiveShiftId);
+  }, [effectiveShiftId]);
 
   const updateSeatStatus = async (seatId: string, status: Seat['status']) => {
     try {
@@ -314,6 +321,19 @@ export default function LibraryPage() {
   const selectedSeatCannotBeDeleted =
     !!selectedSeat && (selectedSeat.is_reserved || selectedSeat.status === 'occupied' || !!selectedSeat.active_checkin_id);
 
+  const formatOccupiedUntil = (value?: string | null) => {
+    if (!value) return '-';
+    // If API returns date-only (YYYY-MM-DD), show a date.
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      const [y, m, d] = value.split('-').map((n) => Number(n));
+      const local = new Date(y, m - 1, d);
+      return local.toLocaleDateString();
+    }
+    const dt = new Date(value);
+    if (Number.isNaN(dt.getTime())) return String(value);
+    return dt.toLocaleString();
+  };
+
   return (
     <>
       <TopNav title="Library Management" onSettingsClick={() => setIsLibrarySettingsOpen(true)} />
@@ -439,7 +459,10 @@ export default function LibraryPage() {
           defaultShiftId={effectiveShiftId}
           defaultSeatTypeId={membershipDefaultSeatTypeId}
           defaultReservedSeatId={membershipDefaultReservedSeatId}
-          onCreated={() => loadSeats(setSeats, effectiveShiftId)}
+          onCreated={(created) => {
+            if (created.shift_id) setActiveShiftId(created.shift_id);
+            void refreshSeats(created.shift_id);
+          }}
         />
 
         {effectiveShiftId && selectedSeat ? (
@@ -449,7 +472,21 @@ export default function LibraryPage() {
             shiftId={effectiveShiftId}
             seatId={selectedSeat.id}
             seatTypeId={selectedSeat.seat_type_id}
-            onCheckedIn={() => loadSeats(setSeats, effectiveShiftId)}
+            onCheckedIn={() => {
+              void refreshSeats();
+            }}
+          />
+        ) : null}
+
+        {selectedSeat?.is_reserved && selectedSeat.reserved_membership_id ? (
+          <RenewMembershipModal
+            isOpen={isRenewModalOpen}
+            onClose={() => setIsRenewModalOpen(false)}
+            membershipId={selectedSeat.reserved_membership_id}
+            currentEndDate={selectedSeat.occupied_until}
+            onRenewed={() => {
+              void refreshSeats();
+            }}
           />
         ) : null}
 
@@ -521,7 +558,7 @@ export default function LibraryPage() {
                     <div className={styles.infoRow} style={{ marginBottom: 0 }}>
                       <span className={styles.label}>Occupied Until</span>
                       <div className={styles.value} style={{ color: '#dc2626' }}>
-                        {selectedSeat.occupied_until ? new Date(selectedSeat.occupied_until).toLocaleString() : '-'}
+                        {formatOccupiedUntil(selectedSeat.occupied_until)}
                       </div>
                     </div>
                   </div>
@@ -573,8 +610,12 @@ export default function LibraryPage() {
                   ) : null}
 
                   {selectedSeat.status === 'occupied' && selectedSeat.is_reserved ? (
-                    <button className={`${styles.btn} ${styles.btnSecondary}`} disabled>
-                      Reserved Seat
+                    <button
+                      className={`${styles.btn} ${styles.btnPrimary}`}
+                      onClick={() => setIsRenewModalOpen(true)}
+                      disabled={!selectedSeat.reserved_membership_id}
+                    >
+                      Renew
                     </button>
                   ) : null}
 
@@ -590,20 +631,17 @@ export default function LibraryPage() {
                     </button>
                   ) : null}
 
-                  <button
-                    className={`${styles.btn} ${styles.btnSecondary}`}
-                    onClick={() => {
-                      if (selectedSeatCannotBeDeleted) {
-                        alert('Reserved or occupied seats cannot be deleted.');
-                        return;
-                      }
-                      if (!confirm('Delete this seat? This cannot be undone.')) return;
-                      void deleteSeat(selectedSeat.id);
-                    }}
-                    disabled={selectedSeatCannotBeDeleted}
-                  >
-                    Delete Seat
-                  </button>
+                  {!selectedSeatCannotBeDeleted ? (
+                    <button
+                      className={`${styles.btn} ${styles.btnSecondary}`}
+                      onClick={() => {
+                        if (!confirm('Delete this seat? This cannot be undone.')) return;
+                        void deleteSeat(selectedSeat.id);
+                      }}
+                    >
+                      Delete Seat
+                    </button>
+                  ) : null}
                 </div>
               </>
             ) : (

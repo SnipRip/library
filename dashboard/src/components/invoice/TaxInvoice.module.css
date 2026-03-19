@@ -1,0 +1,246 @@
+.invoiceRoot {
+  padding: 1.5rem;
+  display: flex;
+  justify-content: center;
+}
+
+.invoiceCard {
+  width: 210mm;
+  max-width: 100%;
+  background: var(--color-bg-white);
+  color: var(--color-text-primary);
+  border: 2px solid var(--color-text-primary);
+}
+
+.topRow {
+  display: grid;
+  grid-template-columns: 1fr 0.55fr;
+  border-bottom: 2px solid var(--color-text-primary);
+}
+
+.topLeft {
+  padding: 0.9rem;
+  border-right: 2px solid var(--color-text-primary);
+}
+
+.topRight {
+  padding: 0.9rem;
+}
+
+.invoiceTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.invoiceTitle {
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.invoiceTag {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--color-text-primary);
+  color: var(--color-text-secondary);
+}
+
+.companyBlock {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.companyLine {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.logoWrap {
+  width: 42px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.logo {
+  object-fit: contain;
+}
+
+.companyName {
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: var(--color-danger-text);
+}
+
+.companyMeta {
+  font-size: 0.85rem;
+  color: var(--color-text-primary);
+}
+
+.metaGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.metaLabel {
+  font-weight: 700;
+}
+
+.metaValue {
+  font-size: 0.95rem;
+}
+
+.sectionRow {
+  padding: 0.9rem;
+  border-bottom: 2px solid var(--color-text-primary);
+}
+
+.sectionTitle {
+  font-weight: 800;
+  margin-bottom: 0.35rem;
+}
+
+.billToBlock {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.billToName {
+  font-weight: 800;
+}
+
+.billToMeta {
+  font-size: 0.9rem;
+}
+
+.tableWrap {
+  border-bottom: 2px solid var(--color-text-primary);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.table thead th {
+  background: var(--color-danger-bg);
+  border-bottom: 2px solid var(--color-text-primary);
+  font-weight: 800;
+  font-size: 0.85rem;
+  padding: 0.5rem;
+  text-align: center;
+}
+
+.table td {
+  border-bottom: 1px solid var(--color-text-secondary);
+  padding: 0.5rem;
+  vertical-align: top;
+  font-size: 0.9rem;
+}
+
+.colSno { width: 8%; }
+.colDesc { width: 40%; }
+.colQty { width: 12%; }
+.colRate { width: 12%; }
+.colTax { width: 10%; }
+.colAmount { width: 18%; }
+
+.cellRight { text-align: right; }
+.cellCenter { text-align: center; }
+
+.descText {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.taxRateNote {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}
+
+.emptyRow {
+  text-align: center;
+  padding: 1rem;
+}
+
+.table tfoot td {
+  background: var(--color-danger-bg);
+  font-weight: 800;
+  border-top: 2px solid var(--color-text-primary);
+  border-bottom: none;
+}
+
+.totalLabel {
+  text-align: right;
+  padding-right: 0.75rem;
+}
+
+.receivedRow {
+  padding: 0.6rem 0.9rem;
+  border-bottom: 2px solid var(--color-text-primary);
+}
+
+.bottomRow {
+  display: grid;
+  grid-template-columns: 1.25fr 0.75fr;
+}
+
+.termsBlock {
+  padding: 0.9rem;
+  border-right: 2px solid var(--color-text-primary);
+}
+
+.termsTitle {
+  font-weight: 800;
+  margin-bottom: 0.4rem;
+}
+
+.termsList {
+  margin-left: 1.1rem;
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.88rem;
+}
+
+.signBlock {
+  padding: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 0.25rem;
+}
+
+.signText {
+  font-size: 0.85rem;
+}
+
+.signCompany {
+  font-weight: 800;
+}
+
+.printHint {
+  max-width: 210mm;
+  width: 100%;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  margin-top: 0.75rem;
+}
+
+@media print {
+  .invoiceRoot {
+    padding: 0;
+  }
+
+  .printHint {
+    display: none;
+  }
+
+  .invoiceCard {
+    border: 2px solid var(--color-text-primary);
+  }
+}
