@@ -1,4 +1,5 @@
 import Image from 'next/image';
+import { useState } from 'react';
 import styles from './TaxInvoice.module.css';
 
 export type TaxInvoiceLineItem = {
@@ -45,6 +46,7 @@ function safeNumber(value: unknown) {
 }
 
 export default function TaxInvoice({ data }: { data: TaxInvoiceData }) {
+    const [logoFailed, setLogoFailed] = useState(false);
     const cgstRate = safeNumber(data.cgstRate ?? 0);
     const sgstRate = safeNumber(data.sgstRate ?? 0);
 
@@ -80,7 +82,7 @@ export default function TaxInvoice({ data }: { data: TaxInvoiceData }) {
 
                         <div className={styles.companyBlock}>
                             <div className={styles.companyLine}>
-                                {data.company.logoUrl ? (
+                                {data.company.logoUrl && !logoFailed ? (
                                     <div className={styles.logoWrap}>
                                         <Image
                                             src={data.company.logoUrl}
@@ -89,9 +91,16 @@ export default function TaxInvoice({ data }: { data: TaxInvoiceData }) {
                                             height={42}
                                             className={styles.logo}
                                             priority
+                                            onError={() => setLogoFailed(true)}
                                         />
                                     </div>
-                                ) : null}
+                                ) : (
+                                    <div className={styles.logoWrap}>
+                                        <div className={styles.logoFallback}>
+                                            {(data.company.name || 'C').trim().slice(0, 1).toUpperCase()}
+                                        </div>
+                                    </div>
+                                )}
                                 <div className={styles.companyName}>{data.company.name}</div>
                             </div>
                             {data.company.addressLines?.length ? (

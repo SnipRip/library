@@ -1,7 +1,9 @@
 .invoiceRoot {
   padding: 1.5rem;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
 }
 
 .invoiceCard {
@@ -63,6 +65,19 @@
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.logoFallback {
+  width: 42px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  background: var(--color-info-bg);
+  color: var(--color-info-text);
+  font-weight: 900;
+  border: 1px solid #e5e7eb;
 }
 
 .logo {
