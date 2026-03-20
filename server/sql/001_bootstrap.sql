@@ -414,6 +414,7 @@ create table if not exists accounting_vouchers (
 
 create index if not exists idx_accounting_vouchers_voucher_date on accounting_vouchers (voucher_date);
 create index if not exists idx_accounting_vouchers_party_student_id on accounting_vouchers (party_student_id);
+create index if not exists idx_accounting_vouchers_party_student_id_voucher_date on accounting_vouchers (party_student_id, voucher_date);
 
 create table if not exists accounting_voucher_lines (
   id uuid primary key default gen_random_uuid(),
@@ -427,6 +428,7 @@ create table if not exists accounting_voucher_lines (
 
 create index if not exists idx_accounting_voucher_lines_voucher_id on accounting_voucher_lines (voucher_id);
 create index if not exists idx_accounting_voucher_lines_ledger_code on accounting_voucher_lines (ledger_code);
+create index if not exists idx_accounting_voucher_lines_ledger_code_voucher_id on accounting_voucher_lines (ledger_code, voucher_id);
 
 -- Seed core ledgers
 insert into accounting_ledgers (code, name, nature)

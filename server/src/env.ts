@@ -4,6 +4,9 @@ const EnvSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3001),
   CORS_ORIGIN: z.string().default("http://localhost:3000"),
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
+  PG_POOL_MAX: z.coerce.number().int().positive().default(10),
+  PG_POOL_IDLE_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
+  PG_POOL_CONNECTION_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
   SESSION_TTL_DAYS: z.coerce.number().int().positive().default(30),
   ENABLE_DEV_AUTH: z
     .string()

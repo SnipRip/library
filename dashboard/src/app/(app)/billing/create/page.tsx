@@ -77,7 +77,6 @@ export default function CreateInvoicePage() {
     const [loadingInvoice, setLoadingInvoice] = useState(false);
     const [invoiceStudentId, setInvoiceStudentId] = useState<string | null>(null);
     const [libraryPeriod, setLibraryPeriod] = useState<{ start: string; end: string } | null>(null);
-    const [billingCategory, setBillingCategory] = useState<'general' | 'library' | 'class'>('general');
     const [items, setItems] = useState<InvoiceItem[]>([{ id: '1', desc: '', qty: 1, price: 0 }]);
     const [customer, setCustomer] = useState('');
     const [students, setStudents] = useState<Student[]>([]);
@@ -114,13 +113,14 @@ export default function CreateInvoicePage() {
         return students.find((s) => (s.full_name || '').trim().toLowerCase() === normalized) ?? null;
     }, [customer, students]);
 
-    useEffect(() => {
-        // Keep a reliable studentId for saving, even if the name doesn't match exactly.
-        if (selectedStudent?.id) setInvoiceStudentId(selectedStudent.id);
-    }, [selectedStudent?.id]);
+    const activeStudentId = invoiceStudentId ?? selectedStudent?.id ?? null;
+    const activeStudent = useMemo(() => {
+        if (!activeStudentId) return null;
+        return students.find((s) => s.id === activeStudentId) ?? null;
+    }, [activeStudentId, students]);
 
     useEffect(() => {
-        if (!selectedStudent?.id) return;
+        if (!activeStudentId) return;
 
         const controller = new AbortController();
 
@@ -129,7 +129,7 @@ export default function CreateInvoicePage() {
             if (!token) return;
 
             const res = await fetch(
-                `${API_BASE_URL}/students/${selectedStudent.id}/billing-items?invoiceDate=${encodeURIComponent(invoiceDate)}`,
+                `${API_BASE_URL}/students/${activeStudentId}/billing-items?invoiceDate=${encodeURIComponent(invoiceDate)}`,
                 {
                 headers: { Authorization: `Bearer ${token}` },
                 signal: controller.signal,
@@ -171,7 +171,7 @@ export default function CreateInvoicePage() {
         });
 
         return () => controller.abort();
-    }, [selectedStudent?.id, invoiceDate]);
+    }, [activeStudentId, invoiceDate]);
 
     const suggestedStudents = useMemo(() => {
         const q = customer.trim().toLowerCase();
@@ -257,7 +257,6 @@ export default function CreateInvoicePage() {
             setCustomer(body.customerName || '');
             setGstRegistered(body.gstRegistered !== false);
             setInvoiceStudentId(body.studentId ?? null);
-            setBillingCategory(body.billingCategory || 'general');
             if (body.billingCategory === 'library' && body.periodStart && body.periodEnd) {
                 setLibraryPeriod({ start: body.periodStart, end: body.periodEnd });
             } else {
@@ -289,7 +288,7 @@ export default function CreateInvoicePage() {
             invoiceNo: nextInvoiceNo,
             invoiceDate,
             customerName: customer,
-            customerMobile: selectedStudent?.phone ?? undefined,
+            customerMobile: activeStudent?.phone ?? undefined,
             items: items.map((it) => ({
                 id: String(it.id),
                 desc: it.desc,
@@ -317,7 +316,6 @@ export default function CreateInvoicePage() {
                 const method = invoiceId ? 'PUT' : 'POST';
 
                 const derivedCategory = deriveBillingCategory();
-                setBillingCategory(derivedCategory);
 
                 const res = await fetch(url, {
                     method,
@@ -330,7 +328,7 @@ export default function CreateInvoicePage() {
                         invoiceDate: draft.invoiceDate,
                         customerName: draft.customerName,
                         customerMobile: draft.customerMobile ?? null,
-                        studentId: invoiceStudentId ?? selectedStudent?.id ?? null,
+                        studentId: activeStudentId,
                         billingCategory: derivedCategory,
                         periodStart: derivedCategory === 'library' ? (libraryPeriod?.start ?? null) : null,
                         periodEnd: derivedCategory === 'library' ? (libraryPeriod?.end ?? null) : null,
@@ -384,7 +382,17 @@ export default function CreateInvoicePage() {
                         placeholder="Search Student..."
                         list="billing-student-suggestions"
                         value={customer}
-                        onChange={e => setCustomer(e.target.value)}
+                        onChange={e => {
+                            const v = e.target.value;
+                            setCustomer(v);
+                            if (!v.trim()) {
+                                setInvoiceStudentId(null);
+                                return;
+                            }
+                            const normalized = v.trim().toLowerCase();
+                            const match = students.find((s) => (s.full_name || '').trim().toLowerCase() === normalized) ?? null;
+                            if (match?.id) setInvoiceStudentId(match.id);
+                        }}
                     />
                     <datalist id="billing-student-suggestions">
                         {suggestedStudents.map((s) => (

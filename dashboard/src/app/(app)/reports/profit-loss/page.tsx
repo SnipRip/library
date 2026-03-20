@@ -63,7 +63,7 @@ export default function ProfitLossPage() {
     return `${data.from} to ${data.to}`;
   }, [data]);
 
-  const loadReport = async () => {
+  const loadReport = async (signal?: AbortSignal) => {
     const token = localStorage.getItem("token");
     if (!token) {
       setError("Please login again");
@@ -81,20 +81,24 @@ export default function ProfitLossPage() {
 
       const res = await fetch(url.toString(), {
         headers: { Authorization: `Bearer ${token}` },
+        signal,
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw new Error(body?.message || "Failed to load profit & loss");
 
       setData(body as ProfitLossResponse);
     } catch (e: unknown) {
+      if (signal?.aborted) return;
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   };
 
   useEffect(() => {
-    void loadReport();
+    const controller = new AbortController();
+    void loadReport(controller.signal);
+    return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

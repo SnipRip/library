@@ -817,7 +817,7 @@ export function EditClassModal({
             return null;
         });
         setFileInputKey((k) => k + 1);
-    }, [isOpen, defaultName, defaultShortDescription, defaultSchedule]);
+    }, [isOpen, defaultName, defaultMonthlyFee, defaultShortDescription, defaultSchedule]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();

@@ -35,6 +35,8 @@ type LedgerResponse = {
   note?: string;
 };
 
+type PaymentMode = "cash" | "bank" | "upi" | "card" | "other";
+
 function todayISO() {
   const d = new Date();
   const yyyy = d.getFullYear();
@@ -73,7 +75,7 @@ export default function LedgerReportPage() {
   const [receiptOpen, setReceiptOpen] = useState(false);
   const [receiptDate, setReceiptDate] = useState<string>(() => todayISO());
   const [receiptAmount, setReceiptAmount] = useState<string>("");
-  const [paymentMode, setPaymentMode] = useState<"cash" | "bank" | "upi" | "card" | "other">("cash");
+  const [paymentMode, setPaymentMode] = useState<PaymentMode>("cash");
   const [reference, setReference] = useState<string>("");
   const [narration, setNarration] = useState<string>("");
   const [savingReceipt, setSavingReceipt] = useState(false);
@@ -343,7 +345,7 @@ export default function LedgerReportPage() {
 
           <div className={modalStyles.inputGroup}>
             <label className={modalStyles.label}>Payment Mode</label>
-            <select className={modalStyles.select} value={paymentMode} onChange={(e) => setPaymentMode(e.target.value as any)}>
+            <select className={modalStyles.select} value={paymentMode} onChange={(e) => setPaymentMode(e.target.value as PaymentMode)}>
               <option value="cash">Cash</option>
               <option value="bank">Bank</option>
               <option value="upi">UPI</option>

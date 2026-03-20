@@ -57,7 +57,7 @@ export default function BalanceSheetPage() {
     return `As of ${data.asOf}`;
   }, [data]);
 
-  const loadReport = async () => {
+  const loadReport = async (signal?: AbortSignal) => {
     const token = localStorage.getItem("token");
     if (!token) {
       setError("Please login again");
@@ -73,21 +73,25 @@ export default function BalanceSheetPage() {
 
       const res = await fetch(url.toString(), {
         headers: { Authorization: `Bearer ${token}` },
+        signal,
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw new Error(body?.message || "Failed to load balance sheet");
 
       setData(body as BalanceSheetResponse);
     } catch (e: unknown) {
+      if (signal?.aborted) return;
       setError(e instanceof Error ? e.message : String(e));
       setData(null);
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   };
 
   useEffect(() => {
-    void loadReport();
+    const controller = new AbortController();
+    void loadReport(controller.signal);
+    return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
