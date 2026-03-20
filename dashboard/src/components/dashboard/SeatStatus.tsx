@@ -11,8 +11,20 @@ interface Seat {
     status: 'available' | 'occupied' | 'maintenance';
 }
 
+interface ShiftRow {
+    id: string;
+    name: string;
+}
+
 export default function SeatStatus() {
     const [seats, setSeats] = useState<Seat[]>([]);
+
+    const sortedSeats = [...seats].sort((a, b) =>
+        (a.seat_number ?? "").localeCompare(b.seat_number ?? "", undefined, {
+            numeric: true,
+            sensitivity: "base",
+        }),
+    );
 
     useEffect(() => {
         let cancelled = false;
@@ -22,7 +34,18 @@ export default function SeatStatus() {
                 const token = getAuthToken();
                 if (!token) return;
 
-                const res = await fetch(`${API_BASE_URL}/library/seats`, {
+                const shiftsRes = await fetch(`${API_BASE_URL}/library/shifts`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                const shiftsBody = await shiftsRes.json().catch(() => null);
+                const shifts = Array.isArray(shiftsBody) ? (shiftsBody as ShiftRow[]) : [];
+                const shiftId = shifts[0]?.id || null;
+
+                const seatsUrl = shiftId
+                    ? `${API_BASE_URL}/library/seats?shift_id=${encodeURIComponent(shiftId)}`
+                    : `${API_BASE_URL}/library/seats`;
+
+                const res = await fetch(seatsUrl, {
                     headers: { Authorization: `Bearer ${token}` },
                 });
                 if (!res.ok) return;
@@ -53,7 +76,7 @@ export default function SeatStatus() {
                 {seats.length === 0 ? (
                     <div className={styles.empty}>No seats configured yet.</div>
                 ) : (
-                    seats.map((seat) => (
+                    sortedSeats.map((seat) => (
                         <div
                             key={seat.id}
                             className={`${styles.seat} ${styles[seat.status]}`}

@@ -143,6 +143,12 @@
   gap: 0.75rem;
 }
 
+.sideWidgets {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
 .transactionsCard,
 .checklistCard {
   background-color: #fff;

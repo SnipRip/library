@@ -6,6 +6,7 @@ import styles from "./page.module.css";
 import { AddStudentModal } from "@/components/modals/Modals";
 
 import SeatStatus from "@/components/dashboard/SeatStatus";
+import LockerStatus from "@/components/dashboard/LockerStatus";
 import { API_BASE_URL } from "@/lib/api";
 import { getAuthToken } from "@/lib/auth";
 
@@ -15,16 +16,27 @@ type Seat = {
   status: "available" | "occupied" | "maintenance";
 };
 
+type ShiftRow = {
+  id: string;
+  name: string;
+};
+
 type ClassRow = {
   id: string;
   name: string;
   status: string;
 };
 
+type LockerRow = {
+  locker_number: number;
+  assignment_id: string | null;
+};
+
 export default function Dashboard() {
   const [isStudentModalOpen, setIsStudentModalOpen] = useState(false);
   const [seatCounts, setSeatCounts] = useState<{ occupied: number; total: number }>({ occupied: 0, total: 0 });
   const [activeClassCount, setActiveClassCount] = useState<number>(0);
+  const [lockerCounts, setLockerCounts] = useState<{ occupied: number; total: number }>({ occupied: 0, total: 0 });
 
   useEffect(() => {
     let cancelled = false;
@@ -34,9 +46,22 @@ export default function Dashboard() {
         const token = getAuthToken();
         if (!token) return;
 
-        const [seatsRes, classesRes] = await Promise.all([
-          fetch(`${API_BASE_URL}/library/seats`, { headers: { Authorization: `Bearer ${token}` } }),
+        // Use shift-aware seats view so "occupied" reflects active check-ins.
+        const shiftsRes = await fetch(`${API_BASE_URL}/library/shifts`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const shiftsBody = await shiftsRes.json().catch(() => null);
+        const shifts = Array.isArray(shiftsBody) ? (shiftsBody as ShiftRow[]) : [];
+        const shiftId = shifts[0]?.id || null;
+
+        const seatsUrl = shiftId
+          ? `${API_BASE_URL}/library/seats?shift_id=${encodeURIComponent(shiftId)}`
+          : `${API_BASE_URL}/library/seats`;
+
+        const [seatsRes, classesRes, lockersRes] = await Promise.all([
+          fetch(seatsUrl, { headers: { Authorization: `Bearer ${token}` } }),
           fetch(`${API_BASE_URL}/classes`, { headers: { Authorization: `Bearer ${token}` } }),
+          fetch(`${API_BASE_URL}/library/lockers`, { headers: { Authorization: `Bearer ${token}` } }),
         ]);
 
         if (seatsRes.ok) {
@@ -52,6 +77,15 @@ export default function Dashboard() {
             ? classes.filter((c) => (c.status || "active").toLowerCase() === "active").length
             : 0;
           if (!cancelled) setActiveClassCount(active);
+        }
+
+        if (lockersRes.ok) {
+          const lockers = (await lockersRes.json()) as LockerRow[];
+          const total = Array.isArray(lockers) ? lockers.length : 0;
+          const occupied = Array.isArray(lockers)
+            ? lockers.filter((l) => Boolean(l.assignment_id)).length
+            : 0;
+          if (!cancelled) setLockerCounts({ occupied, total });
         }
       } catch {
         // ignore; show empty states
@@ -115,6 +149,15 @@ export default function Dashboard() {
               </div>
             </div>
             <div className={`${styles.statWrapper} ${styles.bgBlueLight}`}>
+              <span className={styles.statLabel}>🔒 Lockers</span>
+              <div className={styles.statValue}>
+                {lockerCounts.occupied}
+                <span style={{ fontSize: "1rem", color: "#64748b" }}>/
+                  {lockerCounts.total}
+                </span>
+              </div>
+            </div>
+            <div className={`${styles.statWrapper} ${styles.bgBlueLight}`}>
               <span className={styles.statLabel}>🎓 Coaching Batches</span>
               <div className={styles.statValue}>
                 {activeClassCount}{" "}
@@ -158,8 +201,13 @@ export default function Dashboard() {
               </table>
             </div>
 
-            {/* Seat Status Widget */}
-            <SeatStatus />
+            <div className={styles.sideWidgets}>
+              {/* Seat Status Widget */}
+              <SeatStatus />
+
+              {/* Locker Status Widget */}
+              <LockerStatus />
+            </div>
           </div>
         </div>
 
