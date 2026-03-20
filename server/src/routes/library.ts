@@ -1,5 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import path from "node:path";
+import fs from "node:fs/promises";
+import { pipeline } from "node:stream/promises";
 import { getPool } from "../db/pool.js";
 import { requireAuth } from "../middleware/auth.js";
 
@@ -96,6 +99,23 @@ const VacateSeatSchema = z.object({
   checkin_id: z.string().uuid().optional(),
 });
 
+const CreateBookSectionSchema = z.object({
+  name: z.string().trim().min(1),
+});
+
+const CreateBookSchema = z.object({
+  section_id: z.string().uuid(),
+  title: z.string().trim().min(1),
+  unique_number: z.string().trim().min(1),
+  thumbnail_url: z.string().trim().url().optional().nullable(),
+});
+
+const CreateBookIssueSchema = z.object({
+  book_id: z.string().uuid(),
+  student_id: z.string().uuid(),
+  due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+});
+
 function computeShiftEndAt(now: Date, startHHMM: string, endHHMM: string) {
   const [endH, endM] = endHHMM.split(":").map((n) => Number(n));
   const [startH, startM] = startHHMM.split(":").map((n) => Number(n));
@@ -119,6 +139,18 @@ function computeShiftEndAt(now: Date, startHHMM: string, endHHMM: string) {
   }
 
   return end;
+}
+
+function uploadsRoot() {
+  return path.resolve(process.cwd(), "Uploads");
+}
+
+function extFromMime(mime: string) {
+  const m = (mime || "").toLowerCase();
+  if (m === "image/jpeg" || m === "image/jpg") return "jpg";
+  if (m === "image/png") return "png";
+  if (m === "image/webp") return "webp";
+  return null;
 }
 
 function isActiveOnDateRangeSql(dateExpr: string, tableAlias = "m") {
@@ -1146,6 +1178,277 @@ export async function registerLibraryRoutes(app: FastifyInstance) {
     );
 
     return reply.send(res.rows);
+  });
+
+  // ------------------------------
+  // Library Books (Sections + Books + Issues)
+  // ------------------------------
+
+  app.get("/library/book-sections", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const pool = getPool();
+    const res = await pool.query(
+      `select id, name
+       from library_book_sections
+       order by name asc`,
+    );
+    return reply.send(res.rows);
+  });
+
+  app.post("/library/book-sections", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const parsed = CreateBookSectionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ message: "Invalid body", errors: parsed.error.issues });
+    }
+
+    const pool = getPool();
+    try {
+      const res = await pool.query(
+        `insert into library_book_sections (name)
+         values ($1)
+         on conflict (name)
+         do update set name = excluded.name
+         returning id, name`,
+        [parsed.data.name],
+      );
+      return reply.code(201).send(res.rows[0]);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to create section";
+      return reply.code(409).send({ message });
+    }
+  });
+
+  app.get("/library/books", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const { section_id } = req.query as { section_id?: string };
+    const pool = getPool();
+
+    const params: Array<string> = [];
+    const where = section_id ? (params.push(section_id), `where b.section_id = $1::uuid`) : "";
+
+    const res = await pool.query(
+      `with active_issue as (
+        select
+          i.id as issue_id,
+          i.book_id,
+          i.student_id,
+          st.full_name as student_name,
+          i.issued_date,
+          i.due_date
+        from library_book_issues i
+        join students st on st.id = i.student_id
+        where i.status = 'issued' and i.returned_date is null
+      )
+      select
+        b.id,
+        b.section_id,
+        s.name as section_name,
+        b.title,
+        b.unique_number,
+        b.thumbnail_url,
+        ai.issue_id as active_issue_id,
+        ai.student_id as issued_to_student_id,
+        ai.student_name as issued_to_student_name,
+        ai.issued_date::text as issued_date,
+        ai.due_date::text as due_date
+      from library_books b
+      join library_book_sections s on s.id = b.section_id
+      left join active_issue ai on ai.book_id = b.id
+      ${where}
+      order by b.unique_number asc, b.created_at desc`,
+      params,
+    );
+
+    return reply.send(res.rows);
+  });
+
+  app.post("/library/books", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const parsed = CreateBookSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ message: "Invalid body", errors: parsed.error.issues });
+    }
+
+    const pool = getPool();
+    try {
+      const res = await pool.query(
+        `insert into library_books (section_id, title, unique_number, thumbnail_url)
+         values ($1::uuid, $2, $3, $4)
+         returning id, section_id, title, unique_number, thumbnail_url`,
+        [
+          parsed.data.section_id,
+          parsed.data.title,
+          parsed.data.unique_number,
+          parsed.data.thumbnail_url ?? null,
+        ],
+      );
+      return reply.code(201).send(res.rows[0]);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to create book";
+      return reply.code(409).send({ message });
+    }
+  });
+
+  app.post("/library/books/:id/thumbnail", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const { id } = req.params as { id: string };
+    const pool = getPool();
+
+    const exists = await pool.query(
+      `select id
+       from library_books
+       where id = $1::uuid
+       limit 1`,
+      [id],
+    );
+    if (!exists.rows[0]) return reply.code(404).send({ message: "Book not found" });
+
+    const file = await (req as any).file();
+    if (!file) return reply.code(400).send({ message: "thumbnail file is required" });
+
+    const mime = String(file.mimetype || "");
+    if (!mime.toLowerCase().startsWith("image/")) {
+      return reply.code(400).send({ message: "Only image uploads are allowed" });
+    }
+
+    const ext = extFromMime(mime);
+    if (!ext) {
+      return reply.code(400).send({ message: "Unsupported image type (use jpg/png/webp)" });
+    }
+
+    const dir = path.join(uploadsRoot(), "books", id);
+    await fs.mkdir(dir, { recursive: true });
+    const filename = `thumbnail.${ext}`;
+    const filePath = path.join(dir, filename);
+
+    const handle = await fs.open(filePath, "w");
+    try {
+      await pipeline(file.file, handle.createWriteStream());
+    } finally {
+      await handle.close();
+    }
+
+    const publicPath = `/uploads/books/${id}/${filename}`;
+    const saved = await pool.query(
+      `update library_books
+       set thumbnail_url = $2,
+           updated_at = now()
+       where id = $1::uuid
+       returning id, thumbnail_url`,
+      [id, publicPath],
+    );
+
+    return reply.code(201).send(saved.rows[0]);
+  });
+
+  app.get("/library/book-issues", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const { active } = req.query as { active?: string };
+    const pool = getPool();
+    const where = active === "false" ? "" : "where i.status = 'issued' and i.returned_date is null";
+
+    const res = await pool.query(
+      `select
+        i.id,
+        i.book_id,
+        b.unique_number,
+        b.title,
+        i.student_id,
+        st.full_name as student_name,
+        i.issued_date::text as issued_date,
+        i.due_date::text as due_date,
+        i.returned_date::text as returned_date,
+        i.status,
+        i.created_at
+      from library_book_issues i
+      join library_books b on b.id = i.book_id
+      join students st on st.id = i.student_id
+      ${where}
+      order by i.issued_date desc, i.created_at desc`,
+    );
+
+    return reply.send(res.rows);
+  });
+
+  app.post("/library/book-issues", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const parsed = CreateBookIssueSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ message: "Invalid body", errors: parsed.error.issues });
+    }
+
+    const pool = getPool();
+
+    // Ensure book exists.
+    const bookRes = await pool.query(
+      `select id
+       from library_books
+       where id = $1::uuid
+       limit 1`,
+      [parsed.data.book_id],
+    );
+    if ((bookRes.rows?.length ?? 0) === 0) return reply.code(404).send({ message: "Book not found" });
+
+    // Ensure student exists.
+    const studentRes = await pool.query(
+      `select id
+       from students
+       where id = $1::uuid
+       limit 1`,
+      [parsed.data.student_id],
+    );
+    if ((studentRes.rows?.length ?? 0) === 0) return reply.code(404).send({ message: "Student not found" });
+
+    try {
+      const res = await pool.query(
+        `insert into library_book_issues (book_id, student_id, due_date)
+         values ($1::uuid, $2::uuid, $3::date)
+         returning id, book_id, student_id, issued_date::text as issued_date, due_date::text as due_date, status`,
+        [parsed.data.book_id, parsed.data.student_id, parsed.data.due_date ?? null],
+      );
+      return reply.code(201).send(res.rows[0]);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to issue book";
+      return reply.code(409).send({ message });
+    }
+  });
+
+  app.patch("/library/book-issues/:id/return", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const { id } = req.params as { id: string };
+    const pool = getPool();
+
+    const res = await pool.query(
+      `update library_book_issues
+       set returned_date = current_date,
+           status = 'returned',
+           updated_at = now()
+       where id = $1::uuid
+         and status = 'issued'
+         and returned_date is null
+       returning id`,
+      [id],
+    );
+
+    if (res.rowCount === 0) return reply.code(404).send({ message: "Active issue not found" });
+    return reply.send({ ok: true });
   });
 
   app.post("/library/lockers/assignments", async (req, reply) => {

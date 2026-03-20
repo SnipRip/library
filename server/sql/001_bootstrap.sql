@@ -763,3 +763,52 @@ create unique index if not exists ux_library_locker_assignments_active_student
 create unique index if not exists ux_library_locker_assignments_active_locker
   on library_locker_assignments (locker_number)
   where status = 'active' and end_date is null;
+
+-- Library books (minimal)
+-- Goals:
+-- - Manage book sections (Story, Academic, etc.)
+-- - Each book has a unique number
+-- - Track issuing/returning books to students (one active issue per book)
+
+create table if not exists library_book_sections (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists library_books (
+  id uuid primary key default gen_random_uuid(),
+  section_id uuid not null references library_book_sections(id) on delete restrict,
+  title text not null,
+  unique_number text not null unique,
+  thumbnail_url text null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table library_books add column if not exists thumbnail_url text;
+
+create index if not exists idx_library_books_section_id on library_books (section_id);
+create index if not exists idx_library_books_unique_number on library_books (unique_number);
+
+create table if not exists library_book_issues (
+  id uuid primary key default gen_random_uuid(),
+  book_id uuid not null references library_books(id) on delete restrict,
+  student_id uuid not null references students(id) on delete cascade,
+  issued_date date not null default current_date,
+  due_date date null,
+  returned_date date null,
+  status text not null default 'issued',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_library_book_issues_book_id on library_book_issues (book_id);
+create index if not exists idx_library_book_issues_student_id on library_book_issues (student_id);
+create index if not exists idx_library_book_issues_status on library_book_issues (status);
+
+-- Only one active (not returned) issue per book.
+create unique index if not exists ux_library_book_issues_active_book
+  on library_book_issues (book_id)
+  where status = 'issued' and returned_date is null;
