@@ -32,11 +32,51 @@ type LockerRow = {
   assignment_id: string | null;
 };
 
+type BillingInvoiceRow = {
+  id: string;
+  invoiceNo: string;
+  invoiceDate: string; // yyyy-mm-dd
+  customerName: string;
+  totalAmount: number;
+  status: string;
+  type: string;
+  createdAt: string;
+};
+
+type ReceiptRow = {
+  id: string;
+  receiptNo: string;
+  receiptDate: string; // yyyy-mm-dd
+  studentName: string;
+  amount: number;
+  type: string;
+  status: string;
+  createdAt: string;
+};
+
+type RecentTransactionRow = {
+  id: string;
+  date: string;
+  party: string;
+  type: string;
+  amount: number;
+  status: string;
+  sortKey: number;
+};
+
+function dateToSortKey(isoDate: string | null | undefined) {
+  if (!isoDate) return 0;
+  const t = Date.parse(`${isoDate}T00:00:00Z`);
+  return Number.isFinite(t) ? t : 0;
+}
+
 export default function Dashboard() {
   const [isStudentModalOpen, setIsStudentModalOpen] = useState(false);
   const [seatCounts, setSeatCounts] = useState<{ occupied: number; total: number }>({ occupied: 0, total: 0 });
   const [activeClassCount, setActiveClassCount] = useState<number>(0);
   const [lockerCounts, setLockerCounts] = useState<{ occupied: number; total: number }>({ occupied: 0, total: 0 });
+  const [recentTransactions, setRecentTransactions] = useState<RecentTransactionRow[]>([]);
+  const [transactionsLoading, setTransactionsLoading] = useState<boolean>(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -58,10 +98,12 @@ export default function Dashboard() {
           ? `${API_BASE_URL}/library/seats?shift_id=${encodeURIComponent(shiftId)}`
           : `${API_BASE_URL}/library/seats`;
 
-        const [seatsRes, classesRes, lockersRes] = await Promise.all([
+        const [seatsRes, classesRes, lockersRes, invoicesRes, receiptsRes] = await Promise.all([
           fetch(seatsUrl, { headers: { Authorization: `Bearer ${token}` } }),
           fetch(`${API_BASE_URL}/classes`, { headers: { Authorization: `Bearer ${token}` } }),
           fetch(`${API_BASE_URL}/library/lockers`, { headers: { Authorization: `Bearer ${token}` } }),
+          fetch(`${API_BASE_URL}/billing/invoices?limit=5`, { headers: { Authorization: `Bearer ${token}` } }),
+          fetch(`${API_BASE_URL}/receipts?limit=5`, { headers: { Authorization: `Bearer ${token}` } }),
         ]);
 
         if (seatsRes.ok) {
@@ -87,8 +129,48 @@ export default function Dashboard() {
             : 0;
           if (!cancelled) setLockerCounts({ occupied, total });
         }
+
+        try {
+          const [invoicesBody, receiptsBody] = await Promise.all([
+            invoicesRes.ok ? invoicesRes.json().catch(() => null) : null,
+            receiptsRes.ok ? receiptsRes.json().catch(() => null) : null,
+          ]);
+
+          const invoices = Array.isArray(invoicesBody) ? (invoicesBody as BillingInvoiceRow[]) : [];
+          const receipts = Array.isArray(receiptsBody) ? (receiptsBody as ReceiptRow[]) : [];
+
+          const mappedInvoices: RecentTransactionRow[] = invoices.map((r) => ({
+            id: r.id,
+            date: r.invoiceDate,
+            party: r.customerName,
+            type: r.type || "Sales Invoice",
+            amount: Number.isFinite(r.totalAmount) ? r.totalAmount : Number(r.totalAmount ?? 0),
+            status: r.status || "—",
+            sortKey: dateToSortKey(r.invoiceDate) || Date.parse(r.createdAt ?? "") || 0,
+          }));
+
+          const mappedReceipts: RecentTransactionRow[] = receipts.map((r) => ({
+            id: r.id,
+            date: r.receiptDate,
+            party: r.studentName,
+            type: r.type || "Receipt",
+            amount: Number.isFinite(r.amount) ? r.amount : Number(r.amount ?? 0),
+            status: r.status || "Received",
+            sortKey: dateToSortKey(r.receiptDate) || Date.parse(r.createdAt ?? "") || 0,
+          }));
+
+          const merged = [...mappedInvoices, ...mappedReceipts]
+            .filter((r) => r.sortKey > 0)
+            .sort((a, b) => b.sortKey - a.sortKey)
+            .slice(0, 5);
+
+          if (!cancelled) setRecentTransactions(merged);
+        } finally {
+          if (!cancelled) setTransactionsLoading(false);
+        }
       } catch {
         // ignore; show empty states
+        if (!cancelled) setTransactionsLoading(false);
       }
     }
 
@@ -192,11 +274,31 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr>
-                    <td colSpan={5} style={{ padding: "1.5rem", textAlign: "center", color: "#64748b" }}>
-                      No transactions yet.
-                    </td>
-                  </tr>
+                  {recentTransactions.map((t) => (
+                    <tr key={t.id}>
+                      <td>{t.date || "—"}</td>
+                      <td>{t.party || "—"}</td>
+                      <td>{t.type || "—"}</td>
+                      <td>₹ {Number.isFinite(t.amount) ? t.amount.toFixed(2) : "0.00"}</td>
+                      <td>{t.status || "—"}</td>
+                    </tr>
+                  ))}
+
+                  {transactionsLoading && recentTransactions.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} style={{ padding: "1.5rem", textAlign: "center", color: "#64748b" }}>
+                        Loading...
+                      </td>
+                    </tr>
+                  ) : null}
+
+                  {!transactionsLoading && recentTransactions.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} style={{ padding: "1.5rem", textAlign: "center", color: "#64748b" }}>
+                        No transactions yet.
+                      </td>
+                    </tr>
+                  ) : null}
                 </tbody>
               </table>
             </div>

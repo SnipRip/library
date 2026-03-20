@@ -13,6 +13,58 @@ const CreateReceiptSchema = z.object({
 });
 
 export async function registerReceiptRoutes(app: FastifyInstance) {
+  app.get("/receipts", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    const QuerySchema = z.object({
+      limit: z.coerce.number().int().min(1).max(200).optional().default(50),
+      offset: z.coerce.number().int().min(0).optional().default(0),
+    });
+
+    const parsed = QuerySchema.safeParse((req.query ?? {}) as unknown);
+    if (!parsed.success) {
+      return reply.code(400).send({ message: "Invalid query", errors: parsed.error.issues });
+    }
+
+    const pool = getPool();
+    const res = await pool.query(
+      `select
+        r.id,
+        r.receipt_no,
+        r.receipt_date,
+        r.student_id,
+        st.full_name as student_name,
+        r.amount,
+        r.payment_mode,
+        r.reference,
+        r.narration,
+        r.created_at
+      from receipts r
+      join students st on st.id = r.student_id
+      order by r.receipt_date desc, r.created_at desc
+      limit $1 offset $2`,
+      [parsed.data.limit, parsed.data.offset],
+    );
+
+    return reply.send(
+      res.rows.map((r) => ({
+        id: r.id as string,
+        receiptNo: r.receipt_no as string,
+        receiptDate: String(r.receipt_date).slice(0, 10),
+        studentId: r.student_id as string,
+        studentName: r.student_name as string,
+        amount: typeof r.amount === "number" ? r.amount : Number(r.amount),
+        paymentMode: r.payment_mode as string,
+        reference: (r.reference as string | null) ?? null,
+        narration: (r.narration as string | null) ?? null,
+        createdAt: (r.created_at as Date).toISOString(),
+        type: "Receipt",
+        status: "Received",
+      })),
+    );
+  });
+
   app.post("/receipts", async (req, reply) => {
     const auth = await requireAuth(req);
     if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
