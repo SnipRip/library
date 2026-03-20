@@ -50,6 +50,7 @@ function scheduleSummary(schedule: WeeklyScheduleEntry[] | undefined | null): st
 type ClassRow = {
     id: string;
     name: string;
+    monthly_fee?: number | null;
     short_description?: string | null;
     class_timing?: string | null;
     thumbnail_url?: string | null;
@@ -648,6 +649,7 @@ export default function ClassDetailsPage() {
                         onClose={() => setIsSettingsOpen(false)}
                         classId={effectiveRow.id}
                         defaultName={effectiveRow.name}
+                        defaultMonthlyFee={typeof effectiveRow.monthly_fee === 'number' ? effectiveRow.monthly_fee : 0}
                         defaultShortDescription={effectiveRow.short_description ?? ''}
                         defaultSchedule={effectiveRow.schedule ?? null}
                         onSaved={refreshClass}
@@ -801,6 +803,24 @@ export default function ClassDetailsPage() {
                                         </div>
                                         <div className={styles.fieldValue}>
                                             {scheduleSummary(effectiveRow.schedule) || '-'}
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
+                                            <div className={styles.fieldLabel}>Monthly Fee (₹)</div>
+                                            <button
+                                                type="button"
+                                                className={`${styles.iconButton} ${styles.editIconButton}`}
+                                                onClick={() => setIsSettingsOpen(true)}
+                                                aria-label="Edit monthly fee"
+                                                title="Edit"
+                                            >
+                                                ✎
+                                            </button>
+                                        </div>
+                                        <div className={styles.fieldValue}>
+                                            ₹ {typeof effectiveRow.monthly_fee === 'number' ? effectiveRow.monthly_fee : 0}
                                         </div>
                                     </div>
                                 </div>

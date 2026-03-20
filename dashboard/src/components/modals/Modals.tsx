@@ -777,6 +777,7 @@ interface EditClassModalProps {
     onClose: () => void;
     classId: string;
     defaultName: string;
+    defaultMonthlyFee?: number | null;
     defaultShortDescription?: string | null;
     defaultSchedule?: WeeklyScheduleEntry[] | null;
     onSaved?: () => void;
@@ -787,11 +788,13 @@ export function EditClassModal({
     onClose,
     classId,
     defaultName,
+    defaultMonthlyFee,
     defaultShortDescription,
     defaultSchedule,
     onSaved,
 }: EditClassModalProps) {
     const [name, setName] = useState(defaultName);
+    const [monthlyFee, setMonthlyFee] = useState<number>(typeof defaultMonthlyFee === 'number' ? defaultMonthlyFee : 0);
     const [shortDescription, setShortDescription] = useState(defaultShortDescription ?? '');
     const [weeklySchedule, setWeeklySchedule] = useState<WeeklyScheduleEntry[]>(mergeScheduleWithDefaults(defaultSchedule ?? undefined));
     const [thumbnail, setThumbnail] = useState<File | null>(null);
@@ -804,6 +807,7 @@ export function EditClassModal({
     useEffect(() => {
         if (!isOpen) return;
         setName(defaultName);
+        setMonthlyFee(typeof defaultMonthlyFee === 'number' ? defaultMonthlyFee : 0);
         setShortDescription(defaultShortDescription ?? '');
         setWeeklySchedule(mergeScheduleWithDefaults(defaultSchedule ?? undefined));
         setThumbnail(null);
@@ -838,6 +842,7 @@ export function EditClassModal({
                 },
                 body: JSON.stringify({
                     name: trimmed,
+                    monthly_fee: Number.isFinite(monthlyFee) ? monthlyFee : 0,
                     short_description: descTrimmed,
                     schedule: normalizeScheduleForSave(weeklySchedule),
                 }),
@@ -892,6 +897,17 @@ export function EditClassModal({
                     required
                     value={name}
                     onChange={(e) => setName(e.target.value)}
+                />
+            </div>
+
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Monthly Fee (₹)</label>
+                <input
+                    type="number"
+                    className={styles.input}
+                    min={0}
+                    value={monthlyFee}
+                    onChange={(e) => setMonthlyFee(parseInt(e.target.value || '0', 10) || 0)}
                 />
             </div>
 

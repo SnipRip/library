@@ -43,6 +43,7 @@ const WeeklyScheduleEntrySchema = z
 
 const CreateClassSchema = z.object({
   name: z.string().min(1),
+  monthly_fee: z.number().int().min(0).optional().default(0),
   short_description: z.string().optional().nullable(),
   class_timing: z.string().optional().nullable(),
   schedule: z
@@ -67,6 +68,7 @@ const CreateClassSchema = z.object({
 
 const UpdateClassSchema = z.object({
   name: z.string().min(1).optional(),
+  monthly_fee: z.number().int().min(0).optional(),
   short_description: z.string().optional().nullable(),
   class_timing: z.string().optional().nullable(),
   schedule: z
@@ -151,6 +153,7 @@ export async function registerClassRoutes(app: FastifyInstance) {
       `select
          c.id,
          c.name,
+         c.monthly_fee,
          c.short_description,
          c.class_timing,
          c.thumbnail_url,
@@ -190,6 +193,7 @@ export async function registerClassRoutes(app: FastifyInstance) {
       `select
          c.id,
          c.name,
+         c.monthly_fee,
          c.short_description,
          c.class_timing,
          c.thumbnail_url,
@@ -892,17 +896,17 @@ export async function registerClassRoutes(app: FastifyInstance) {
     }
 
     const pool = getPool();
-    const { name, status, short_description, class_timing, schedule } = parsed.data;
+    const { name, status, monthly_fee, short_description, class_timing, schedule } = parsed.data;
 
     const client = await pool.connect();
     try {
       await client.query("begin");
 
       const result = await client.query(
-        `insert into classes (name, short_description, class_timing, status)
-         values ($1, $2, $3, $4)
-         returning id, name, short_description, class_timing, thumbnail_url, banner_url, status, created_at, updated_at`,
-        [name, short_description ?? null, class_timing ?? null, status],
+        `insert into classes (name, monthly_fee, short_description, class_timing, status)
+         values ($1, $2, $3, $4, $5)
+         returning id, name, monthly_fee, short_description, class_timing, thumbnail_url, banner_url, status, created_at, updated_at`,
+        [name, monthly_fee ?? 0, short_description ?? null, class_timing ?? null, status],
       );
 
       const created = result.rows[0] as { id: string };
@@ -934,6 +938,7 @@ export async function registerClassRoutes(app: FastifyInstance) {
         `select
            c.id,
            c.name,
+           c.monthly_fee,
            c.short_description,
            c.class_timing,
            c.thumbnail_url,
@@ -994,15 +999,18 @@ export async function registerClassRoutes(app: FastifyInstance) {
       await client.query(
         `update classes
          set name = case when $2::boolean then $3 else name end,
-             short_description = case when $4::boolean then $5 else short_description end,
-             class_timing = case when $6::boolean then $7 else class_timing end,
-             status = case when $8::boolean then $9 else status end,
+             monthly_fee = case when $4::boolean then $5 else monthly_fee end,
+             short_description = case when $6::boolean then $7 else short_description end,
+             class_timing = case when $8::boolean then $9 else class_timing end,
+             status = case when $10::boolean then $11 else status end,
              updated_at = now()
          where id = $1`,
         [
           id,
           data.name !== undefined,
           data.name ?? null,
+          data.monthly_fee !== undefined,
+          data.monthly_fee ?? 0,
           data.short_description !== undefined,
           data.short_description ?? null,
           data.class_timing !== undefined,
@@ -1043,6 +1051,7 @@ export async function registerClassRoutes(app: FastifyInstance) {
         `select
            c.id,
            c.name,
+           c.monthly_fee,
            c.short_description,
            c.class_timing,
            c.thumbnail_url,

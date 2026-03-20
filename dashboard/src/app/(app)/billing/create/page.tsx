@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import styles from './create.module.css';
 import { DraftInvoice, INVOICE_DRAFT_STORAGE_KEY, makeInvoiceNo, todayISODate } from '@/lib/invoiceDraft';
 import { API_BASE_URL } from '@/lib/api';
@@ -25,6 +25,7 @@ type InvoiceItem = {
     desc: string;
     qty: number;
     price: number;
+    kind?: string;
 };
 
 type Student = {
@@ -36,6 +37,21 @@ type Student = {
 type BillingSuggestionResponse = {
     student: Student;
     items: Array<{ id: string; desc: string; qty: number; price: number; kind: string }>;
+    libraryPeriod?: { start: string; end: string } | null;
+};
+
+type LoadedInvoice = {
+    id: string;
+    invoiceNo: string;
+    invoiceDate: string;
+    studentId: string | null;
+    customerName: string;
+    customerMobile: string | null;
+    billingCategory?: 'general' | 'library' | 'class';
+    periodStart?: string | null;
+    periodEnd?: string | null;
+    gstRegistered: boolean;
+    items: Array<{ id: string; desc: string; qty: number; price: number }>;
 };
 
 async function fetchStudents(signal?: AbortSignal): Promise<Student[]> {
@@ -53,6 +69,15 @@ async function fetchStudents(signal?: AbortSignal): Promise<Student[]> {
 
 export default function CreateInvoicePage() {
     const router = useRouter();
+    const searchParams = useSearchParams();
+    const invoiceIdParam = searchParams.get('invoiceId');
+
+    const [invoiceId, setInvoiceId] = useState<string | null>(null);
+    const [invoiceNo, setInvoiceNo] = useState<string>('');
+    const [loadingInvoice, setLoadingInvoice] = useState(false);
+    const [invoiceStudentId, setInvoiceStudentId] = useState<string | null>(null);
+    const [libraryPeriod, setLibraryPeriod] = useState<{ start: string; end: string } | null>(null);
+    const [billingCategory, setBillingCategory] = useState<'general' | 'library' | 'class'>('general');
     const [items, setItems] = useState<InvoiceItem[]>([{ id: '1', desc: '', qty: 1, price: 0 }]);
     const [customer, setCustomer] = useState('');
     const [students, setStudents] = useState<Student[]>([]);
@@ -90,6 +115,11 @@ export default function CreateInvoicePage() {
     }, [customer, students]);
 
     useEffect(() => {
+        // Keep a reliable studentId for saving, even if the name doesn't match exactly.
+        if (selectedStudent?.id) setInvoiceStudentId(selectedStudent.id);
+    }, [selectedStudent?.id]);
+
+    useEffect(() => {
         if (!selectedStudent?.id) return;
 
         const controller = new AbortController();
@@ -98,20 +128,27 @@ export default function CreateInvoicePage() {
             const token = localStorage.getItem('token');
             if (!token) return;
 
-            const res = await fetch(`${API_BASE_URL}/students/${selectedStudent.id}/billing-items`, {
+            const res = await fetch(
+                `${API_BASE_URL}/students/${selectedStudent.id}/billing-items?invoiceDate=${encodeURIComponent(invoiceDate)}`,
+                {
                 headers: { Authorization: `Bearer ${token}` },
                 signal: controller.signal,
-            });
+                },
+            );
             if (!res.ok) return;
 
             const body = (await res.json().catch(() => null)) as BillingSuggestionResponse | null;
             if (!body || !Array.isArray(body.items)) return;
+
+            const nextPeriod = body.libraryPeriod && body.libraryPeriod.start && body.libraryPeriod.end ? body.libraryPeriod : null;
+            setLibraryPeriod(nextPeriod);
 
             const suggested: InvoiceItem[] = body.items.map((it) => ({
                 id: it.id,
                 desc: it.desc,
                 qty: typeof it.qty === 'number' && Number.isFinite(it.qty) ? it.qty : 1,
                 price: typeof it.price === 'number' && Number.isFinite(it.price) ? it.price : 0,
+                kind: it.kind,
             }));
 
             setItems((prev) => {
@@ -134,7 +171,7 @@ export default function CreateInvoicePage() {
         });
 
         return () => controller.abort();
-    }, [selectedStudent?.id]);
+    }, [selectedStudent?.id, invoiceDate]);
 
     const suggestedStudents = useMemo(() => {
         const q = customer.trim().toLowerCase();
@@ -168,10 +205,88 @@ export default function CreateInvoicePage() {
     const gst = total * gstRate;
     const grandTotal = total + gst;
 
-    const saveAndPrint = () => {
-        const invoiceNo = makeInvoiceNo();
-        const draft: DraftInvoice = {
-            invoiceNo,
+    const inferKindFromDesc = (desc: string): string | undefined => {
+        const d = (desc || '').trim().toLowerCase();
+        if (d.startsWith('library fee')) return 'library';
+        if (d.startsWith('reserved seat fee')) return 'reserved_seat';
+        if (d.startsWith('locker fee')) return 'locker';
+        if (d.startsWith('class fee')) return 'class';
+        return undefined;
+    };
+
+    const deriveBillingCategory = (): 'general' | 'library' | 'class' => {
+        const kinds = items
+            .map((it) => it.kind ?? inferKindFromDesc(it.desc))
+            .filter(Boolean) as string[];
+        const hasLibrary = kinds.some((k) => k === 'library' || k === 'reserved_seat' || k === 'locker');
+        if (hasLibrary) return 'library';
+        const hasClass = kinds.some((k) => k === 'class');
+        if (hasClass) return 'class';
+        return 'general';
+    };
+
+    useEffect(() => {
+        if (!invoiceIdParam) return;
+        if (typeof window === 'undefined') return;
+
+        const controller = new AbortController();
+        (async () => {
+            const token = localStorage.getItem('token');
+            if (!token) return;
+
+            setLoadingInvoice(true);
+            const res = await fetch(`${API_BASE_URL}/billing/invoices/${encodeURIComponent(invoiceIdParam)}`, {
+                headers: { Authorization: `Bearer ${token}` },
+                signal: controller.signal,
+            });
+
+            if (!res.ok) {
+                setLoadingInvoice(false);
+                return;
+            }
+
+            const body = (await res.json().catch(() => null)) as LoadedInvoice | null;
+            if (!body || !body.id) {
+                setLoadingInvoice(false);
+                return;
+            }
+
+            setInvoiceId(body.id);
+            setInvoiceNo(body.invoiceNo || '');
+            setInvoiceDate(body.invoiceDate || todayISODate());
+            setCustomer(body.customerName || '');
+            setGstRegistered(body.gstRegistered !== false);
+            setInvoiceStudentId(body.studentId ?? null);
+            setBillingCategory(body.billingCategory || 'general');
+            if (body.billingCategory === 'library' && body.periodStart && body.periodEnd) {
+                setLibraryPeriod({ start: body.periodStart, end: body.periodEnd });
+            } else {
+                setLibraryPeriod(null);
+            }
+            setItems(
+                Array.isArray(body.items) && body.items.length
+                    ? body.items.map((it) => ({
+                        id: String(it.id || Date.now()),
+                        desc: it.desc || '',
+                        qty: typeof it.qty === 'number' && Number.isFinite(it.qty) ? it.qty : 1,
+                        price: typeof it.price === 'number' && Number.isFinite(it.price) ? it.price : 0,
+                        kind: inferKindFromDesc(it.desc || ''),
+                    }))
+                    : [{ id: String(Date.now()), desc: '', qty: 1, price: 0 }],
+            );
+            setLoadingInvoice(false);
+        })().catch(() => {
+            setLoadingInvoice(false);
+        });
+
+        return () => controller.abort();
+        // only re-run when invoiceId changes in URL
+    }, [invoiceIdParam]);
+
+    const buildDraft = (forcedInvoiceNo?: string): DraftInvoice => {
+        const nextInvoiceNo = forcedInvoiceNo || invoiceNo || makeInvoiceNo();
+        return {
+            invoiceNo: nextInvoiceNo,
             invoiceDate,
             customerName: customer,
             customerMobile: selectedStudent?.phone ?? undefined,
@@ -182,8 +297,78 @@ export default function CreateInvoicePage() {
                 price: it.price,
             })),
         };
+    };
+
+    const viewOrPrint = () => {
+        const draft = buildDraft();
+        sessionStorage.setItem(INVOICE_DRAFT_STORAGE_KEY, JSON.stringify(draft));
+        router.push('/billing/print');
+    };
+
+    const saveAndPrint = async () => {
+        const draft = buildDraft();
 
         sessionStorage.setItem(INVOICE_DRAFT_STORAGE_KEY, JSON.stringify(draft));
+
+        try {
+            const token = localStorage.getItem('token');
+            if (token) {
+                const url = invoiceId ? `${API_BASE_URL}/billing/invoices/${encodeURIComponent(invoiceId)}` : `${API_BASE_URL}/billing/invoices`;
+                const method = invoiceId ? 'PUT' : 'POST';
+
+                const derivedCategory = deriveBillingCategory();
+                setBillingCategory(derivedCategory);
+
+                const res = await fetch(url, {
+                    method,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({
+                        invoiceNo: draft.invoiceNo,
+                        invoiceDate: draft.invoiceDate,
+                        customerName: draft.customerName,
+                        customerMobile: draft.customerMobile ?? null,
+                        studentId: invoiceStudentId ?? selectedStudent?.id ?? null,
+                        billingCategory: derivedCategory,
+                        periodStart: derivedCategory === 'library' ? (libraryPeriod?.start ?? null) : null,
+                        periodEnd: derivedCategory === 'library' ? (libraryPeriod?.end ?? null) : null,
+                        gstRegistered,
+                        items: draft.items.map((it) => ({
+                            desc: it.desc,
+                            qty: it.qty,
+                            price: it.price,
+                        })),
+                    }),
+                });
+
+                if (!res.ok) {
+                    const msg = await res.json().catch(() => null) as { message?: unknown; existingInvoiceId?: unknown } | null;
+                    if (res.status === 409 && msg && typeof msg.existingInvoiceId === 'string') {
+                        window.alert(
+                            'Invoice for this student for this billing period already exists. Opening the existing invoice for editing.',
+                        );
+                        router.push(`/billing/create?invoiceId=${encodeURIComponent(msg.existingInvoiceId)}`);
+                        return;
+                    }
+                    // Keep printing working even if saving fails.
+                    window.alert(
+                        `Could not save invoice to Billing list.\n\n${
+                            (msg && typeof msg.message === 'string' && msg.message) || 'Please try again.'
+                        }`,
+                    );
+                } else {
+                    const saved = await res.json().catch(() => null) as { id?: string; invoiceNo?: string } | null;
+                    if (saved?.id) setInvoiceId(saved.id);
+                    if (saved?.invoiceNo) setInvoiceNo(saved.invoiceNo);
+                }
+            } else {
+                window.alert('You are not logged in, so the invoice will not be saved to Billing list.');
+            }
+        } catch {
+            window.alert('Could not save invoice to Billing list. Please check connection and try again.');
+        }
         router.push('/billing/print');
     };
 
@@ -286,6 +471,11 @@ export default function CreateInvoicePage() {
 
             <div className={styles.actions}>
                 <button onClick={() => router.back()} className={styles.cancelBtn}>Cancel</button>
+                {invoiceId ? (
+                    <button className={styles.cancelBtn} type="button" onClick={viewOrPrint} disabled={loadingInvoice}>
+                        View / Print
+                    </button>
+                ) : null}
                 <button className={styles.saveBtn} onClick={saveAndPrint}>Save & Print</button>
             </div>
 

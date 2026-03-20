@@ -1,10 +1,59 @@
 "use client";
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import TopNav from '@/components/TopNav';
 import styles from './billing.module.css';
+import { API_BASE_URL } from '@/lib/api';
+
+type BillingInvoiceRow = {
+    id: string;
+    invoiceNo: string;
+    invoiceDate: string; // yyyy-mm-dd
+    customerName: string;
+    totalAmount: number;
+    status: string;
+    type: string;
+};
 
 export default function BillingPage() {
+    const router = useRouter();
+    const [rows, setRows] = useState<BillingInvoiceRow[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const controller = new AbortController();
+        (async () => {
+            const token = localStorage.getItem('token');
+            if (!token) {
+                setRows([]);
+                setLoading(false);
+                return;
+            }
+
+            const res = await fetch(`${API_BASE_URL}/billing/invoices`, {
+                headers: { Authorization: `Bearer ${token}` },
+                signal: controller.signal,
+            });
+
+            if (!res.ok) {
+                setRows([]);
+                setLoading(false);
+                return;
+            }
+
+            const body = await res.json().catch(() => null);
+            setRows(Array.isArray(body) ? (body as BillingInvoiceRow[]) : []);
+            setLoading(false);
+        })().catch(() => {
+            setRows([]);
+            setLoading(false);
+        });
+
+        return () => controller.abort();
+    }, []);
+
     return (
         <>
             <TopNav title="Billing & Accounting" />
@@ -45,11 +94,36 @@ export default function BillingPage() {
                             </tr>
                         </thead>
                         <tbody>
-                            <tr>
-                                <td colSpan={6} style={{ textAlign: 'center', padding: '1.5rem' }}>
-                                    No transactions yet.
-                                </td>
-                            </tr>
+                            {rows.map((r) => (
+                                <tr
+                                    key={r.id}
+                                    onClick={() => router.push(`/billing/create?invoiceId=${encodeURIComponent(r.id)}`)}
+                                    style={{ cursor: 'pointer' }}
+                                >
+                                    <td>{r.invoiceDate}</td>
+                                    <td>{r.customerName}</td>
+                                    <td>{r.type || 'Sales Invoice'}</td>
+                                    <td>₹ {Number.isFinite(r.totalAmount) ? r.totalAmount.toFixed(2) : '0.00'}</td>
+                                    <td>{r.status}</td>
+                                    <td />
+                                </tr>
+                            ))}
+
+                            {loading && rows.length === 0 ? (
+                                <tr>
+                                    <td colSpan={6} style={{ textAlign: 'center', padding: '1.5rem' }}>
+                                        Loading...
+                                    </td>
+                                </tr>
+                            ) : null}
+
+                            {!loading && rows.length === 0 ? (
+                                <tr>
+                                    <td colSpan={6} style={{ textAlign: 'center', padding: '1.5rem' }}>
+                                        No transactions yet.
+                                    </td>
+                                </tr>
+                            ) : null}
                         </tbody>
                     </table>
                 </div>

@@ -32,6 +32,7 @@ function scheduleSummary(schedule: WeeklyScheduleEntry[] | undefined | null): st
 type ClassRow = {
     id: string;
     name: string;
+    monthly_fee?: number | null;
     short_description?: string | null;
     schedule?: WeeklyScheduleEntry[] | null;
     thumbnail_url?: string | null;
@@ -165,7 +166,10 @@ export default function ClassesPage() {
                                     ) : null}
 
                                     <div className={styles.footer} suppressHydrationWarning>
-                                        <span className={styles.fee} style={{ fontSize: '0.875rem', fontWeight: 500 }}>View Details &rarr;</span>
+                                        <span className={styles.fee}>
+                                            ₹ {typeof cls.monthly_fee === 'number' ? cls.monthly_fee : 0}
+                                        </span>
+                                        <span style={{ fontSize: '0.875rem', fontWeight: 500 }}>View Details &rarr;</span>
                                     </div>
                                 </div>
                             </Link>

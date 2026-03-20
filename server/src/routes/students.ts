@@ -3,6 +3,67 @@ import { z } from "zod";
 import { getPool } from "../db/pool.js";
 import { requireAuth } from "../middleware/auth.js";
 
+function parseISODateOrToday(raw: unknown) {
+  if (typeof raw === "string" && /^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const d = new Date();
+  return d.toISOString().slice(0, 10);
+}
+
+function daysInMonthUTC(year: number, monthIndex0: number) {
+  // monthIndex0: 0..11
+  return new Date(Date.UTC(year, monthIndex0 + 1, 0)).getUTCDate();
+}
+
+function toUTCDate(iso: string) {
+  return new Date(`${iso}T00:00:00.000Z`);
+}
+
+function toISODateUTC(d: Date) {
+  return d.toISOString().slice(0, 10);
+}
+
+function makeClampedUTCDate(year: number, monthIndex0: number, day: number) {
+  const dim = daysInMonthUTC(year, monthIndex0);
+  const clampedDay = Math.min(day, dim);
+  return new Date(Date.UTC(year, monthIndex0, clampedDay));
+}
+
+function addMonthsClampedUTC(d: Date, months: number, anchorDay: number) {
+  const y = d.getUTCFullYear();
+  const m = d.getUTCMonth();
+  const nextMonth0 = m + months;
+  const ny = y + Math.floor(nextMonth0 / 12);
+  const nm = ((nextMonth0 % 12) + 12) % 12;
+  return makeClampedUTCDate(ny, nm, anchorDay);
+}
+
+function diffDaysUTC(start: Date, end: Date) {
+  const ms = end.getTime() - start.getTime();
+  return Math.max(0, Math.round(ms / (24 * 60 * 60 * 1000)));
+}
+
+function round2(n: number) {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
+function computeLibraryCycle(anchorStartISO: string, invoiceISO: string) {
+  const anchor = toUTCDate(anchorStartISO);
+  const invoice = toUTCDate(invoiceISO);
+  const anchorDay = anchor.getUTCDate();
+
+  const iy = invoice.getUTCFullYear();
+  const im = invoice.getUTCMonth();
+  const candidateStart = makeClampedUTCDate(iy, im, anchorDay);
+
+  let cycleStart = candidateStart;
+  if (invoice.getTime() < candidateStart.getTime()) {
+    cycleStart = addMonthsClampedUTC(candidateStart, -1, anchorDay);
+  }
+  const cycleEnd = addMonthsClampedUTC(cycleStart, 1, anchorDay);
+
+  return { start: toISODateUTC(cycleStart), end: toISODateUTC(cycleEnd) };
+}
+
 const CreateStudentSchema = z.object({
   // dashboard modal sends `name`, but other clients may send `full_name`
   name: z.string().min(1).optional(),
@@ -43,6 +104,7 @@ export async function registerStudentRoutes(app: FastifyInstance) {
     if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
 
     const { id } = req.params as { id: string };
+    const invoiceDate = parseISODateOrToday((req.query as { invoiceDate?: unknown } | undefined)?.invoiceDate);
     const pool = getPool();
 
     const studentRes = await pool.query(
@@ -62,6 +124,8 @@ export async function registerStudentRoutes(app: FastifyInstance) {
       price: number;
       kind: "library" | "reserved_seat" | "locker" | "class";
     }> = [];
+
+    let libraryPeriod: { start: string; end: string } | null = null;
 
     // Library memberships (active; include upcoming reservations too)
     const membershipsRes = await pool.query(
@@ -86,6 +150,12 @@ export async function registerStudentRoutes(app: FastifyInstance) {
       order by m.created_at desc`,
       [id],
     );
+
+    // Determine billing cycle from the newest active membership (anchor = membership.start_date)
+    const firstMembershipRow = membershipsRes.rows[0] as { start_date?: string } | undefined;
+    if (firstMembershipRow?.start_date) {
+      libraryPeriod = computeLibraryCycle(String(firstMembershipRow.start_date).slice(0, 10), invoiceDate);
+    }
 
     for (const row of membershipsRes.rows as Array<{
       membership_id: string;
@@ -126,6 +196,7 @@ export async function registerStudentRoutes(app: FastifyInstance) {
       `select
         a.id as assignment_id,
         a.locker_number,
+        a.start_date,
         s.monthly_fee
        from library_locker_assignments a
        cross join (
@@ -142,22 +213,46 @@ export async function registerStudentRoutes(app: FastifyInstance) {
       [id],
     );
     const locker = lockerRes.rows[0] as
-      | { assignment_id: string; locker_number: number; monthly_fee: number }
+      | { assignment_id: string; locker_number: number; start_date: string; monthly_fee: number }
       | undefined;
     if (locker) {
       const lockerFee = typeof locker.monthly_fee === "number" && Number.isFinite(locker.monthly_fee) ? locker.monthly_fee : 0;
+      let lockerPrice = lockerFee;
+
+      // Prorate locker within the library billing cycle if we can compute it.
+      // Example: library cycle 19->next 19, locker starts on 29 => bill 29->19 proportionally.
+      if (libraryPeriod) {
+        const cycleStart = toUTCDate(libraryPeriod.start);
+        const cycleEnd = toUTCDate(libraryPeriod.end);
+        const lockerStartISO = String(locker.start_date).slice(0, 10);
+
+        if (lockerStartISO) {
+          const lockerStart = toUTCDate(lockerStartISO);
+          const billFrom = lockerStart.getTime() > cycleStart.getTime() ? lockerStart : cycleStart;
+          if (billFrom.getTime() < cycleEnd.getTime()) {
+            const cycleDays = diffDaysUTC(cycleStart, cycleEnd);
+            const billDays = diffDaysUTC(billFrom, cycleEnd);
+            if (cycleDays > 0) {
+              lockerPrice = round2(lockerFee * (billDays / cycleDays));
+            }
+          } else {
+            lockerPrice = 0;
+          }
+        }
+      }
+
       items.push({
         id: `locker:${locker.assignment_id}`,
         kind: "locker",
         desc: `Locker Fee - Locker #${locker.locker_number}`,
         qty: 1,
-        price: lockerFee,
+        price: lockerPrice,
       });
     }
 
     // Class enrollments (active)
     const enrollRes = await pool.query(
-      `select e.id as enrollment_id, c.name as class_name
+      `select e.id as enrollment_id, c.name as class_name, c.monthly_fee
        from class_enrollments e
        join classes c on c.id = e.class_id
        where e.student_id = $1
@@ -167,17 +262,18 @@ export async function registerStudentRoutes(app: FastifyInstance) {
       [id],
     );
 
-    for (const row of enrollRes.rows as Array<{ enrollment_id: string; class_name: string }>) {
+    for (const row of enrollRes.rows as Array<{ enrollment_id: string; class_name: string; monthly_fee: number | null }>) {
+      const classFee = typeof row.monthly_fee === "number" && Number.isFinite(row.monthly_fee) ? row.monthly_fee : 0;
       items.push({
         id: `class:${row.enrollment_id}`,
         kind: "class",
         desc: `Class Fee - ${row.class_name}`,
         qty: 1,
-        price: 0,
+        price: classFee,
       });
     }
 
-    return reply.send({ student, items });
+    return reply.send({ student, items, libraryPeriod });
   });
 
   app.post("/students", async (req, reply) => {

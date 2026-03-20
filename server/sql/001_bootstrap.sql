@@ -43,6 +43,7 @@ create table if not exists classes (
   id uuid primary key default gen_random_uuid(),
   name text not null unique,
   status text not null default 'active',
+  monthly_fee integer not null default 0 check (monthly_fee >= 0),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -52,6 +53,23 @@ alter table classes add column if not exists short_description text;
 alter table classes add column if not exists class_timing text;
 alter table classes add column if not exists thumbnail_url text;
 alter table classes add column if not exists banner_url text;
+alter table classes add column if not exists monthly_fee integer not null default 0;
+
+-- Safety: enforce non-negative monthly fee on existing tables
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'chk_classes_monthly_fee_nonneg'
+  ) then
+    alter table classes
+      add constraint chk_classes_monthly_fee_nonneg
+      check (monthly_fee >= 0);
+  end if;
+exception
+  when duplicate_object then null;
+end $$;
 
 -- Class weekly schedule (per-day timing; days can be off)
 create table if not exists class_weekly_schedule (
@@ -256,6 +274,81 @@ alter table library_seats add column if not exists occupied_until timestamptz;
 create index if not exists idx_library_seats_status on library_seats (status);
 create index if not exists idx_library_seats_hall_id on library_seats (hall_id);
 create index if not exists idx_library_seats_seat_type_id on library_seats (seat_type_id);
+
+-- Billing (minimal)
+create table if not exists billing_invoices (
+  id uuid primary key default gen_random_uuid(),
+  invoice_no text not null,
+  invoice_date date not null,
+  -- First day of invoice month; used to enforce one-invoice-per-month per student
+  billing_month date generated always as (make_date(extract(year from invoice_date)::int, extract(month from invoice_date)::int, 1)) stored,
+  student_id uuid null references students(id) on delete set null,
+  customer_name text not null,
+  customer_mobile text null,
+  billing_category text not null default 'general',
+  period_start date null,
+  period_end date null,
+  gst_registered boolean not null default true,
+  subtotal_amount numeric(12,2) not null default 0,
+  gst_amount numeric(12,2) not null default 0,
+  total_amount numeric(12,2) not null default 0,
+  status text not null default 'issued',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- If the table existed from a previous bootstrap, ensure new columns exist.
+alter table billing_invoices add column if not exists billing_category text not null default 'general';
+alter table billing_invoices add column if not exists period_start date;
+alter table billing_invoices add column if not exists period_end date;
+
+create index if not exists idx_billing_invoices_invoice_date on billing_invoices (invoice_date);
+create index if not exists idx_billing_invoices_student_id on billing_invoices (student_id);
+
+-- Drop old constraint: it blocks legit non-calendar periods (library cycles) and class prepay.
+drop index if exists ux_billing_invoices_student_month;
+
+-- Enforce: only one LIBRARY-cycle invoice per student per billing period
+create unique index if not exists ux_billing_invoices_student_library_period
+  on billing_invoices (student_id, period_start, period_end)
+  where student_id is not null
+    and billing_category = 'library'
+    and status <> 'void'
+    and period_start is not null
+    and period_end is not null;
+
+-- If the table existed from a previous bootstrap, ensure new columns exist.
+do $$
+begin
+  if not exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'billing_invoices'
+      and column_name = 'billing_month'
+  ) then
+    alter table billing_invoices
+      add column billing_month date generated always as (
+        make_date(extract(year from invoice_date)::int, extract(month from invoice_date)::int, 1)
+      ) stored;
+  end if;
+exception
+  when duplicate_column then null;
+end $$;
+
+-- Ensure any old calendar-month uniqueness index is removed.
+drop index if exists ux_billing_invoices_student_month;
+
+create table if not exists billing_invoice_items (
+  id uuid primary key default gen_random_uuid(),
+  invoice_id uuid not null references billing_invoices(id) on delete cascade,
+  description text not null,
+  quantity integer not null check (quantity > 0),
+  unit_price numeric(12,2) not null default 0,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_billing_invoice_items_invoice_id on billing_invoice_items (invoice_id);
 
 -- Library shifts (minimal)
 create table if not exists library_shifts (
