@@ -6,6 +6,7 @@ import styles from "../library.module.css";
 import { API_BASE_URL } from "@/lib/api";
 import LockerSettingsModal from "@/components/modals/LockerSettingsModal";
 import { getAuthToken } from "@/lib/auth";
+import StudentCombobox from "@/components/ui/StudentCombobox";
 
 interface StudentMini {
   id: string;
@@ -372,27 +373,14 @@ export default function LibraryLockersPage() {
                   {!selectedLocker.assignment_id ? (
                     <>
                       <div style={{ display: "grid", gap: "0.4rem" }}>
-                        <label style={{ fontSize: "0.75rem", color: "#64748b", textTransform: "uppercase", fontWeight: 700 }}>
-                          Assign to Student
-                        </label>
-                        <select
+                        <label className={styles.label}>Assign to Student</label>
+                        <StudentCombobox
+                          students={students}
                           value={assignStudentId}
-                          onChange={(e) => setAssignStudentId(e.target.value)}
-                          style={{
-                            padding: "0.65rem 0.75rem",
-                            borderRadius: "0.5rem",
-                            border: "1px solid #e2e8f0",
-                            fontWeight: 700,
-                            background: "white",
-                          }}
-                        >
-                          <option value="">-- Select Student --</option>
-                          {students.map((s) => (
-                            <option key={s.id} value={s.id}>
-                              {s.full_name}
-                            </option>
-                          ))}
-                        </select>
+                          onChange={setAssignStudentId}
+                          inputClassName={styles.input}
+                          placeholder="Search student (type name)"
+                        />
                       </div>
 
                       <button

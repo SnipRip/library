@@ -308,6 +308,58 @@
   font-size: 0.8rem;
 }
 
+.combo {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.comboMenu {
+  margin-top: 6px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.08);
+  max-height: 260px;
+  overflow: auto;
+}
+
+.comboItem {
+  width: 100%;
+  text-align: left;
+  padding: 0.6rem 0.75rem;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid #f1f5f9;
+  cursor: pointer;
+}
+
+.comboItem:last-child {
+  border-bottom: 0;
+}
+
+.comboItem:hover {
+  background: #f8fafc;
+}
+
+.comboItemTitle {
+  font-weight: 700;
+  color: #0f172a;
+  font-size: 0.9rem;
+}
+
+.comboItemMeta {
+  color: #64748b;
+  font-size: 0.8rem;
+  margin-top: 2px;
+}
+
+.comboEmpty {
+  padding: 0.7rem 0.75rem;
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
 @media (max-width: 900px) {
   .layout {
     grid-template-columns: 1fr;

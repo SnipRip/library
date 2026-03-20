@@ -5,6 +5,7 @@ import styles from './Modal.module.css';
 import { API_BASE_URL } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
 import Cropper, { type Area } from 'react-easy-crop';
+import StudentCombobox from '@/components/ui/StudentCombobox';
 
 // NOTE: This file historically read the auth token from persistent localStorage.
 // We now want refresh to keep the session but tab-close to log out, so the token
@@ -3021,14 +3022,14 @@ export function CreateMembershipModal({
         >
             <div className={styles.inputGroup}>
                 <label className={styles.label}>Student</label>
-                <select className={styles.input} value={studentId} onChange={(e) => setStudentId(e.target.value)} required>
-                    <option value="">Select student</option>
-                    {students.map((s) => (
-                        <option key={s.id} value={s.id}>
-                            {s.full_name}
-                        </option>
-                    ))}
-                </select>
+                <StudentCombobox
+                    students={students}
+                    value={studentId}
+                    onChange={setStudentId}
+                    inputClassName={styles.input}
+                    placeholder="Search student (type name)"
+                    required
+                />
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
@@ -3184,14 +3185,14 @@ export function CheckInSeatModal({ isOpen, onClose, shiftId, seatId, seatTypeId,
         >
             <div className={styles.inputGroup}>
                 <label className={styles.label}>Admission</label>
-                <select className={styles.input} value={membershipId} onChange={(e) => setMembershipId(e.target.value)} required>
-                    <option value="">Select student</option>
-                    {memberships.map((m) => (
-                        <option key={m.id} value={m.id}>
-                            {m.student_name}
-                        </option>
-                    ))}
-                </select>
+                <StudentCombobox
+                    students={memberships.map((m) => ({ id: m.id, full_name: m.student_name }))}
+                    value={membershipId}
+                    onChange={setMembershipId}
+                    inputClassName={styles.input}
+                    placeholder="Search student (type name)"
+                    required
+                />
             </div>
         </BaseModal>
     );

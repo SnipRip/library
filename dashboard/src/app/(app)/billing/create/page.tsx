@@ -6,6 +6,7 @@ import styles from './create.module.css';
 import { DraftInvoice, INVOICE_DRAFT_STORAGE_KEY, makeInvoiceNo, todayISODate } from '@/lib/invoiceDraft';
 import { API_BASE_URL } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
+import StudentCombobox, { type StudentComboboxItem } from '@/components/ui/StudentCombobox';
 
 const BILLING_PREFS_KEY = 'companyBillingPrefs:v1';
 
@@ -108,17 +109,16 @@ export default function CreateInvoicePage() {
         return () => controller.abort();
     }, []);
 
-    const selectedStudent = useMemo(() => {
-        const normalized = customer.trim().toLowerCase();
-        if (!normalized) return null;
-        return students.find((s) => (s.full_name || '').trim().toLowerCase() === normalized) ?? null;
-    }, [customer, students]);
-
-    const activeStudentId = invoiceStudentId ?? selectedStudent?.id ?? null;
+    const activeStudentId = invoiceStudentId ?? null;
     const activeStudent = useMemo(() => {
         if (!activeStudentId) return null;
         return students.find((s) => s.id === activeStudentId) ?? null;
     }, [activeStudentId, students]);
+
+    const studentItems: StudentComboboxItem[] = useMemo(
+        () => students.map((s) => ({ id: s.id, full_name: s.full_name, status: s.phone ?? '' })),
+        [students],
+    );
 
     useEffect(() => {
         if (!activeStudentId) return;
@@ -173,18 +173,6 @@ export default function CreateInvoicePage() {
 
         return () => controller.abort();
     }, [activeStudentId, invoiceDate]);
-
-    const suggestedStudents = useMemo(() => {
-        const q = customer.trim().toLowerCase();
-        const base = q
-            ? students.filter((s) => {
-                const name = (s.full_name || '').toLowerCase();
-                const phone = (s.phone || '').toLowerCase();
-                return name.includes(q) || phone.includes(q);
-            })
-            : students;
-        return base.slice(0, 25);
-    }, [customer, students]);
 
     const addItem = () => {
         setItems([...items, { id: String(Date.now()), desc: '', qty: 1, price: 0 }]);
@@ -378,28 +366,19 @@ export default function CreateInvoicePage() {
             <div className={styles.invoiceHeader}>
                 <div className={styles.inputGroup}>
                     <label>Customer / Student Name</label>
-                    <input
-                        type="text"
-                        placeholder="Search Student..."
-                        list="billing-student-suggestions"
-                        value={customer}
-                        onChange={e => {
-                            const v = e.target.value;
-                            setCustomer(v);
-                            if (!v.trim()) {
-                                setInvoiceStudentId(null);
-                                return;
-                            }
-                            const normalized = v.trim().toLowerCase();
-                            const match = students.find((s) => (s.full_name || '').trim().toLowerCase() === normalized) ?? null;
-                            if (match?.id) setInvoiceStudentId(match.id);
+                    <StudentCombobox
+                        students={studentItems}
+                        value={invoiceStudentId ?? ''}
+                        onChange={(id) => {
+                            const nextId = id || null;
+                            setInvoiceStudentId(nextId);
+                            const match = nextId ? students.find((s) => s.id === nextId) ?? null : null;
+                            setCustomer(match?.full_name ?? '');
                         }}
+                        inputClassName={styles.input}
+                        placeholder="Search student (name / phone)"
+                        required
                     />
-                    <datalist id="billing-student-suggestions">
-                        {suggestedStudents.map((s) => (
-                            <option key={s.id} value={s.full_name} label={s.phone ?? undefined} />
-                        ))}
-                    </datalist>
                 </div>
                 <div className={styles.inputGroup}>
                     <label>Invoice Date</label>

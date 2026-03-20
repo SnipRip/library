@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import TopNav from "@/components/TopNav";
 import { API_BASE_URL } from "@/lib/api";
 import { getAuthToken } from "@/lib/auth";
 import styles from "./books.module.css";
+import StudentCombobox from "@/components/ui/StudentCombobox";
 
 type BookSection = {
   id: string;
@@ -74,6 +75,11 @@ export default function LibraryBooksPage() {
   const [issueBookId, setIssueBookId] = useState<string>("");
   const [issueStudentId, setIssueStudentId] = useState<string>("");
   const [issuing, setIssuing] = useState<boolean>(false);
+
+  const [bookQuery, setBookQuery] = useState<string>("");
+  const [bookMenuOpen, setBookMenuOpen] = useState<boolean>(false);
+
+  const bookComboRef = useRef<HTMLDivElement | null>(null);
 
   const selectedSection = useMemo(() => sections.find((s) => s.id === selectedSectionId) ?? null, [sections, selectedSectionId]);
 
@@ -257,6 +263,31 @@ export default function LibraryBooksPage() {
 
   const availableBooks = useMemo(() => books.filter((b) => !b.active_issue_id), [books]);
 
+  const normalizedBookQuery = bookQuery.trim().toLowerCase();
+  const filteredAvailableBooks = useMemo(() => {
+    if (!normalizedBookQuery) return availableBooks;
+    return availableBooks.filter((b) => {
+      const title = (b.title || "").toLowerCase();
+      const unique = (b.unique_number || "").toLowerCase();
+      return title.startsWith(normalizedBookQuery) || unique.startsWith(normalizedBookQuery);
+    });
+  }, [availableBooks, normalizedBookQuery]);
+
+  const selectBook = (b: BookRow) => {
+    setIssueBookId(b.id);
+    setBookQuery(`${b.unique_number} — ${b.title}`);
+    setBookMenuOpen(false);
+  };
+
+  useEffect(() => {
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as Node | null;
+      if (target && bookComboRef.current && !bookComboRef.current.contains(target)) setBookMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, []);
+
   return (
     <>
       <TopNav title="Book Management" />
@@ -402,25 +433,64 @@ export default function LibraryBooksPage() {
             <div className={styles.cardBody}>
               <div className={styles.block}>
                 <div className={styles.row}>
-                  <select className={styles.input} value={issueBookId} onChange={(e) => setIssueBookId(e.target.value)}>
-                    <option value="">Select available book</option>
-                    {availableBooks.map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.unique_number} — {b.title}
-                      </option>
-                    ))}
-                  </select>
+                  <div className={styles.combo} ref={bookComboRef}>
+                    <input
+                      className={styles.input}
+                      placeholder="Search available book (type title or unique no.)"
+                      value={bookQuery}
+                      onChange={(e) => {
+                        setBookQuery(e.target.value);
+                        setIssueBookId("");
+                        setBookMenuOpen(true);
+                      }}
+                      onFocus={() => {
+                        setBookMenuOpen(true);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") setBookMenuOpen(false);
+                        if (e.key === "Enter") {
+                          const first = filteredAvailableBooks[0];
+                          if (first) selectBook(first);
+                        }
+                      }}
+                    />
+                    {bookMenuOpen && (
+                      <div className={styles.comboMenu} role="listbox" aria-label="Available books">
+                        {filteredAvailableBooks.length === 0 ? (
+                          <div className={styles.comboEmpty}>No matches.</div>
+                        ) : (
+                          filteredAvailableBooks.map((b) => (
+                            <button
+                              key={b.id}
+                              type="button"
+                              className={styles.comboItem}
+                              onClick={() => selectBook(b)}
+                              title={b.title}
+                            >
+                              <div className={styles.comboItemTitle}>
+                                {b.unique_number} — {b.title}
+                              </div>
+                              <div className={styles.comboItemMeta}>Available</div>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <div className={styles.row}>
-                  <select className={styles.input} value={issueStudentId} onChange={(e) => setIssueStudentId(e.target.value)}>
-                    <option value="">Select student</option>
-                    {students.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.full_name}
-                      </option>
-                    ))}
-                  </select>
+                  <StudentCombobox
+                    students={students}
+                    value={issueStudentId}
+                    onChange={(id) => {
+                      setIssueStudentId(id);
+                      setBookMenuOpen(false);
+                    }}
+                    inputClassName={styles.input}
+                    placeholder="Search student (type name)"
+                    required
+                  />
                 </div>
 
                 <button

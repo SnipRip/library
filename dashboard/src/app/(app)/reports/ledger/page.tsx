@@ -7,6 +7,7 @@ import styles from "./ledger.module.css";
 import { API_BASE_URL } from "@/lib/api";
 import { getAuthToken } from "@/lib/auth";
 import modalStyles from "@/components/modals/Modal.module.css";
+import StudentCombobox, { type StudentComboboxItem } from "@/components/ui/StudentCombobox";
 
 type StudentRow = {
   id: string;
@@ -65,6 +66,11 @@ function formatInr(amount: number) {
 export default function LedgerReportPage() {
   const [students, setStudents] = useState<StudentRow[] | null>(null);
   const [studentId, setStudentId] = useState<string>("");
+
+  const studentItems: StudentComboboxItem[] = useMemo(
+    () => (students ?? []).map((s) => ({ id: s.id, full_name: `${s.full_name} (${s.phone})` })),
+    [students],
+  );
 
   const [from, setFrom] = useState<string>(() => finYearStartISO(new Date()));
   const [to, setTo] = useState<string>(() => todayISO());
@@ -227,18 +233,15 @@ export default function LedgerReportPage() {
         <div className={styles.filters}>
           <div className={styles.field}>
             <div className={styles.label}>Party (Student)</div>
-            <select
-              className={styles.input}
+            <StudentCombobox
+              students={studentItems}
               value={studentId}
-              onChange={(e) => setStudentId(e.target.value)}
+              onChange={setStudentId}
+              inputClassName={styles.input}
+              placeholder="Search party (type name)"
               disabled={students === null || loading}
-            >
-              {(students ?? []).map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.full_name} ({s.phone})
-                </option>
-              ))}
-            </select>
+              required
+            />
           </div>
 
           <div className={styles.field}>
