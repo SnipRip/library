@@ -37,6 +37,78 @@ function toISODate(value: unknown) {
   return "";
 }
 
+async function upsertInvoiceVoucherAndLines(opts: {
+  client: { query: (sql: string, params?: unknown[]) => Promise<{ rows: any[] }> };
+  invoiceId: string;
+  invoiceNo: string;
+  invoiceDate: string;
+  studentId: string | null;
+  customerName: string;
+  billingCategory: string;
+  subtotal: number;
+  gstAmount: number;
+  totalAmount: number;
+}) {
+  const narration = `${opts.billingCategory.toUpperCase()} Invoice`;
+
+  const voucherRes = await opts.client.query(
+    `insert into accounting_vouchers (
+        voucher_type,
+        voucher_no,
+        voucher_date,
+        party_student_id,
+        party_name,
+        narration,
+        source_type,
+        source_id
+      )
+     values ('Sales', $1, $2::date, $3::uuid, $4, $5, 'invoice', $6::uuid)
+     on conflict (source_type, source_id)
+     do update set
+       voucher_no = excluded.voucher_no,
+       voucher_date = excluded.voucher_date,
+       party_student_id = excluded.party_student_id,
+       party_name = excluded.party_name,
+       narration = excluded.narration,
+       updated_at = now()
+     returning id`,
+    [
+      opts.invoiceNo,
+      opts.invoiceDate,
+      opts.studentId,
+      opts.customerName,
+      narration,
+      opts.invoiceId,
+    ],
+  );
+
+  const voucherId = voucherRes.rows[0]?.id as string;
+
+  await opts.client.query(`delete from accounting_voucher_lines where voucher_id = $1::uuid`, [voucherId]);
+
+  if (opts.totalAmount > 0) {
+    await opts.client.query(
+      `insert into accounting_voucher_lines (voucher_id, ledger_code, debit, credit)
+       values ($1::uuid, 'DEBTORS_CTRL', $2, 0)`,
+      [voucherId, opts.totalAmount],
+    );
+  }
+  if (opts.subtotal > 0) {
+    await opts.client.query(
+      `insert into accounting_voucher_lines (voucher_id, ledger_code, debit, credit)
+       values ($1::uuid, 'SALES', 0, $2)`,
+      [voucherId, opts.subtotal],
+    );
+  }
+  if (opts.gstAmount > 0) {
+    await opts.client.query(
+      `insert into accounting_voucher_lines (voucher_id, ledger_code, debit, credit)
+       values ($1::uuid, 'OUTPUT_GST', 0, $2)`,
+      [voucherId, opts.gstAmount],
+    );
+  }
+}
+
 async function findExistingStudentMonthInvoice(opts: {
   studentId: string;
   invoiceDate: string;
@@ -320,6 +392,19 @@ export async function registerBillingRoutes(app: FastifyInstance) {
         );
       }
 
+      await upsertInvoiceVoucherAndLines({
+        client,
+        invoiceId: invoiceRow.id,
+        invoiceNo: invoiceRow.invoice_no,
+        invoiceDate,
+        studentId: studentId ?? null,
+        customerName,
+        billingCategory,
+        subtotal,
+        gstAmount,
+        totalAmount,
+      });
+
       await client.query("commit");
 
       return reply.code(201).send({
@@ -446,6 +531,19 @@ export async function registerBillingRoutes(app: FastifyInstance) {
           [existing.id, it.desc, it.qty, round2(it.price)],
         );
       }
+
+      await upsertInvoiceVoucherAndLines({
+        client,
+        invoiceId: existing.id,
+        invoiceNo: existing.invoice_no,
+        invoiceDate,
+        studentId: studentId ?? null,
+        customerName,
+        billingCategory,
+        subtotal,
+        gstAmount,
+        totalAmount,
+      });
 
       await client.query("commit");
 

@@ -1,39 +1,31 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import TopNav from "@/components/TopNav";
-import UniversalModal from "@/components/modals/UniversalModal";
 import styles from "./balance-sheet.module.css";
 import modalStyles from "@/components/modals/Modal.module.css";
+import { API_BASE_URL } from "@/lib/api";
 
-type SheetSide = "liabilities" | "assets";
+type BalanceType = "Dr" | "Cr";
 
-type Group = {
-  id: string;
-  side: SheetSide;
-  title: string;
-  hint?: string;
-};
-
-type Entry = {
-  id: string;
-  groupId: string;
-  date: string;
-  name: string;
+type BalanceSheetLine = {
+  ledgerCode: string;
+  ledgerName: string;
   amount: number;
+  balanceType: BalanceType;
 };
 
-const GROUPS: Group[] = [
-  { id: "capital", side: "liabilities", title: "Capital", hint: "Owner equity and long-term funding" },
-  { id: "current-liability", side: "liabilities", title: "Current Liabilities", hint: "Short-term dues and payables" },
-  { id: "loans", side: "liabilities", title: "Loans", hint: "Borrowings and outstanding loan balances" },
-  { id: "result", side: "liabilities", title: "Current Period Result", hint: "Profit / loss moved to equity" },
-
-  { id: "current-assets", side: "assets", title: "Current Assets", hint: "Cash, stock, and receivables" },
-  { id: "fixed-assets", side: "assets", title: "Fixed Assets", hint: "Equipment, furniture, and long-term assets" },
-  { id: "investments", side: "assets", title: "Investments", hint: "Long-term holdings and deposits" },
-  { id: "advances", side: "assets", title: "Advances", hint: "Deposits and advances paid" },
-];
+type BalanceSheetResponse = {
+  asOf: string;
+  assets: BalanceSheetLine[];
+  liabilities: BalanceSheetLine[];
+  totals: {
+    assets: { amount: number; type: BalanceType };
+    liabilities: { amount: number; type: BalanceType };
+    difference: { amount: number; type: "Balanced" | "Assets higher" | "Liabilities higher" };
+  };
+  note?: string;
+};
 
 function formatInr(amount: number) {
   return new Intl.NumberFormat("en-IN", {
@@ -54,159 +46,96 @@ function todayISO() {
 export default function BalanceSheetPage() {
   const [asOfDate, setAsOfDate] = useState(todayISO());
 
-  const [entries, setEntries] = useState<Entry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [data, setData] = useState<BalanceSheetResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
-  const [modalOpen, setModalOpen] = useState(false);
+  const canLoad = Boolean(asOfDate) && !loading;
 
-  const [entryDate, setEntryDate] = useState(todayISO());
-  const [ledgerName, setLedgerName] = useState("");
-  const [amount, setAmount] = useState<string>("");
+  const header = useMemo(() => {
+    if (!data) return null;
+    return `As of ${data.asOf}`;
+  }, [data]);
 
-  const activeGroup = useMemo(() => {
-    if (!activeGroupId) return null;
-    return GROUPS.find((g) => g.id === activeGroupId) || null;
-  }, [activeGroupId]);
-
-  const entriesByGroup = useMemo(() => {
-    const map = new Map<string, Entry[]>();
-    for (const group of GROUPS) map.set(group.id, []);
-    for (const e of entries) {
-      const current = map.get(e.groupId) || [];
-      current.push(e);
-      map.set(e.groupId, current);
-    }
-    // stable ordering: newest first
-    for (const [k, v] of map.entries()) {
-      map.set(
-        k,
-        [...v].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
-      );
-    }
-    return map;
-  }, [entries]);
-
-  const totals = useMemo(() => {
-    const perGroup: Record<string, number> = {};
-    for (const group of GROUPS) {
-      const sum = (entriesByGroup.get(group.id) || []).reduce((acc, e) => acc + e.amount, 0);
-      perGroup[group.id] = sum;
-    }
-
-    const totalBySide: Record<SheetSide, number> = {
-      liabilities: GROUPS.filter((g) => g.side === "liabilities").reduce((acc, g) => acc + (perGroup[g.id] || 0), 0),
-      assets: GROUPS.filter((g) => g.side === "assets").reduce((acc, g) => acc + (perGroup[g.id] || 0), 0),
-    };
-
-    return { perGroup, totalBySide };
-  }, [entriesByGroup]);
-
-  const openAddEntry = (groupId: string) => {
-    setActiveGroupId(groupId);
-    setEntryDate(asOfDate);
-    setLedgerName("");
-    setAmount("");
-    setModalOpen(true);
-  };
-
-  const closeModal = () => {
-    setModalOpen(false);
-    setActiveGroupId(null);
-  };
-
-  const handleSave = (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!activeGroupId) return;
-
-    const parsed = Number(amount);
-    if (!ledgerName.trim()) {
-      alert("Please enter a ledger name.");
-      return;
-    }
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      alert("Please enter a valid amount.");
+  const loadReport = async () => {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      setError("Please login again");
       return;
     }
 
-    const newEntry: Entry = {
-      id: `entry-${Date.now()}`,
-      groupId: activeGroupId,
-      date: entryDate,
-      name: ledgerName.trim(),
-      amount: parsed,
-    };
+    setLoading(true);
+    setError(null);
 
-    setEntries((prev) => [newEntry, ...prev]);
-    closeModal();
+    try {
+      const url = new URL(`${API_BASE_URL}/reports/balance-sheet`);
+      url.searchParams.set("asOf", asOfDate);
+
+      const res = await fetch(url.toString(), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(body?.message || "Failed to load balance sheet");
+
+      setData(body as BalanceSheetResponse);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const renderPanel = (side: SheetSide, title: string) => {
-    const groups = GROUPS.filter((g) => g.side === side);
+  useEffect(() => {
+    void loadReport();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
+  const renderPanel = (title: string, lines: BalanceSheetLine[], total: { amount: number; type: BalanceType }) => {
     return (
       <section className={styles.panel}>
         <div className={styles.panelHeader}>
           <h3>{title}</h3>
-          <div className={styles.panelTotal}>{formatInr(totals.totalBySide[side])}</div>
+          <div className={styles.panelTotal}>
+            {formatInr(total.amount)} {total.type}
+          </div>
         </div>
 
-        {groups.map((g) => {
-          const groupEntries = entriesByGroup.get(g.id) || [];
-          const groupTotal = totals.perGroup[g.id] || 0;
+        <div className={styles.section}>
+          <div className={styles.sectionHead}>
+            <div className={styles.sectionTitle}>Ledgers</div>
+          </div>
 
-          return (
-            <div key={g.id} className={styles.section}>
-              <div className={styles.sectionHead}>
-                <div className={styles.sectionTitle}>
-                  {g.title}
-                  <span className={styles.infoDot} title={g.hint || ""}>
-                    i
-                  </span>
-                </div>
-
-                <button className={styles.addLink} type="button" onClick={() => openAddEntry(g.id)}>
-                  + Add entry
-                </button>
-              </div>
-
-              <div className={styles.rows}>
-                {groupEntries.length === 0 ? (
-                  <div className={styles.hint}>No entries yet.</div>
-                ) : (
-                  groupEntries.map((e) => (
-                    <div key={e.id} className={styles.row}>
-                      <div>
-                        <div className={styles.rowName}>{e.name}</div>
-                        <div className={styles.rowMeta}>{e.date}</div>
-                      </div>
-                      <div className={styles.rowRight}>
-                        <div className={styles.amount}>{formatInr(e.amount)}</div>
-                      </div>
-                    </div>
-                  ))
-                )}
-
-                {groupEntries.length > 0 && (
-                  <div className={styles.row} style={{ borderBottom: "none", paddingBottom: 0 }}>
-                    <div className={styles.rowMeta}>Group total</div>
-                    <div className={styles.amount}>{formatInr(groupTotal)}</div>
+          <div className={styles.rows}>
+            {lines.length === 0 ? (
+              <div className={styles.hint}>No balances.</div>
+            ) : (
+              lines.map((l) => (
+                <div key={l.ledgerCode} className={styles.row}>
+                  <div>
+                    <div className={styles.rowName}>{l.ledgerName}</div>
+                    <div className={styles.rowMeta}>{l.ledgerCode}</div>
                   </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
+                  <div className={styles.rowRight}>
+                    <div className={styles.amount}>
+                      {formatInr(l.amount)} {l.balanceType}
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
 
         <div className={styles.footerTotals}>
-          <span>Total {side === "liabilities" ? "Liabilities" : "Assets"}</span>
-          <span>{formatInr(totals.totalBySide[side])}</span>
+          <span>Total {title}</span>
+          <span>
+            {formatInr(total.amount)} {total.type}
+          </span>
         </div>
       </section>
     );
   };
-
-  const difference = totals.totalBySide.assets - totals.totalBySide.liabilities;
 
   return (
     <>
@@ -228,92 +157,39 @@ export default function BalanceSheetPage() {
                 onChange={(e) => setAsOfDate(e.target.value)}
                 className={modalStyles.input}
                 style={{ width: 160 }}
+                disabled={loading}
               />
             </label>
 
             <button
               className={styles.actionBtn}
               type="button"
-              onClick={() => alert("Email export is UI-only in this demo.")}
+              onClick={() => void loadReport()}
+              disabled={!canLoad}
             >
-              Email
-            </button>
-            <button
-              className={styles.actionBtn}
-              type="button"
-              onClick={() => alert("Download is UI-only in this demo.")}
-            >
-              Download
+              {loading ? "Loading…" : "Load"}
             </button>
           </div>
         </div>
 
-        <div className={styles.banner}>
-          <div>
-            <strong>Tip:</strong> Use “Add entry” to add ledger rows. This is frontend-only state for now.
+        {error ? <div className={styles.banner}>{error}</div> : null}
+
+        {data ? (
+          <div className={styles.banner}>
+            <div>
+              <strong>{header}</strong>
+              {data.note ? <span className={styles.rowMeta}> · {data.note}</span> : null}
+            </div>
+            <div className={styles.rowMeta}>
+              Difference: <strong>{formatInr(data.totals.difference.amount)}</strong> ({data.totals.difference.type})
+            </div>
           </div>
-          <div className={styles.rowMeta}>
-            Difference: <strong>{formatInr(Math.abs(difference))}</strong> ({difference === 0 ? "Balanced" : difference > 0 ? "Assets higher" : "Liabilities higher"})
-          </div>
-        </div>
+        ) : null}
 
         <div className={styles.grid}>
-          {renderPanel("liabilities", "Liabilities")}
-          {renderPanel("assets", "Assets")}
+          {renderPanel("Liabilities", data?.liabilities || [], data?.totals.liabilities || { amount: 0, type: "Cr" })}
+          {renderPanel("Assets", data?.assets || [], data?.totals.assets || { amount: 0, type: "Dr" })}
         </div>
-
-        <UniversalModal
-          isOpen={modalOpen}
-          onClose={closeModal}
-          title={activeGroup ? `Add entry · ${activeGroup.title}` : "Add entry"}
-          onSubmit={handleSave}
-          primaryLabel="Save"
-        >
-          <div className={modalStyles.inputGroup}>
-            <label className={modalStyles.label}>Ledger category</label>
-            <div className={styles.hint}>{activeGroup ? activeGroup.title : "—"}</div>
-          </div>
-
-          <div className={styles.formGrid}>
-            <div className={modalStyles.inputGroup}>
-              <label className={modalStyles.label}>Date</label>
-              <input
-                type="date"
-                className={modalStyles.input}
-                value={entryDate}
-                onChange={(e) => setEntryDate(e.target.value)}
-                required
-              />
-            </div>
-
-            <div className={modalStyles.inputGroup}>
-              <label className={modalStyles.label}>Amount</label>
-              <input
-                type="number"
-                className={modalStyles.input}
-                placeholder="e.g. 2500"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                min={0}
-                step={1}
-                required
-              />
-            </div>
-          </div>
-
-          <div className={modalStyles.inputGroup}>
-            <label className={modalStyles.label}>Ledger name</label>
-            <input
-              type="text"
-              className={modalStyles.input}
-              placeholder="e.g. Cash in bank"
-              value={ledgerName}
-              onChange={(e) => setLedgerName(e.target.value)}
-              required
-            />
-            <div className={styles.hint}>Example: Cash, Inventory, Tax payable, etc.</div>
-          </div>
-        </UniversalModal>
       </div>
     </>
   );

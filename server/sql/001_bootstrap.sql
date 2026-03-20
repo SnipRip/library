@@ -350,6 +350,204 @@ create table if not exists billing_invoice_items (
 
 create index if not exists idx_billing_invoice_items_invoice_id on billing_invoice_items (invoice_id);
 
+-- Receipts (payment collection) — minimal Indian-style Receipt voucher
+create sequence if not exists receipt_no_seq;
+
+create table if not exists receipts (
+  id uuid primary key default gen_random_uuid(),
+  receipt_no text not null unique,
+  receipt_date date not null,
+  student_id uuid not null references students(id) on delete restrict,
+  amount numeric(12,2) not null check (amount > 0),
+  payment_mode text not null,
+  reference text null,
+  narration text null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- Safety for re-runs
+alter table receipts add column if not exists reference text;
+alter table receipts add column if not exists narration text;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'chk_receipts_payment_mode'
+  ) then
+    alter table receipts
+      add constraint chk_receipts_payment_mode
+      check (payment_mode in ('cash', 'bank', 'upi', 'card', 'other'));
+  end if;
+exception
+  when duplicate_object then null;
+end $$;
+
+create index if not exists idx_receipts_student_id on receipts (student_id);
+create index if not exists idx_receipts_receipt_date on receipts (receipt_date);
+
+-- Accounting (double-entry) — minimal ledger system (Indian style)
+create table if not exists accounting_ledgers (
+  code text primary key,
+  name text not null,
+  nature text not null check (nature in ('asset', 'liability', 'income', 'expense')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists accounting_vouchers (
+  id uuid primary key default gen_random_uuid(),
+  voucher_type text not null,
+  voucher_no text not null,
+  voucher_date date not null,
+  party_student_id uuid null references students(id) on delete set null,
+  party_name text null,
+  narration text null,
+  source_type text not null,
+  source_id uuid not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (source_type, source_id)
+);
+
+create index if not exists idx_accounting_vouchers_voucher_date on accounting_vouchers (voucher_date);
+create index if not exists idx_accounting_vouchers_party_student_id on accounting_vouchers (party_student_id);
+
+create table if not exists accounting_voucher_lines (
+  id uuid primary key default gen_random_uuid(),
+  voucher_id uuid not null references accounting_vouchers(id) on delete cascade,
+  ledger_code text not null references accounting_ledgers(code) on delete restrict,
+  debit numeric(12,2) not null default 0 check (debit >= 0),
+  credit numeric(12,2) not null default 0 check (credit >= 0),
+  created_at timestamptz not null default now(),
+  check ((debit > 0 and credit = 0) or (debit = 0 and credit > 0))
+);
+
+create index if not exists idx_accounting_voucher_lines_voucher_id on accounting_voucher_lines (voucher_id);
+create index if not exists idx_accounting_voucher_lines_ledger_code on accounting_voucher_lines (ledger_code);
+
+-- Seed core ledgers
+insert into accounting_ledgers (code, name, nature)
+values
+  ('DEBTORS_CTRL', 'Sundry Debtors (Control)', 'asset'),
+  ('CASH', 'Cash', 'asset'),
+  ('BANK', 'Bank', 'asset'),
+  ('UPI', 'UPI', 'asset'),
+  ('CARD', 'Card', 'asset'),
+  ('SALES', 'Sales', 'income'),
+  ('OUTPUT_GST', 'Output GST', 'liability'),
+  ('EXPENSE_MISC', 'Expenses (Misc)', 'expense')
+on conflict (code) do nothing;
+
+-- Voucher numbering for manual vouchers (expenses/payments/journals later)
+create sequence if not exists accounting_voucher_no_seq;
+
+-- Backfill vouchers for invoices/receipts (idempotent)
+insert into accounting_vouchers (voucher_type, voucher_no, voucher_date, party_student_id, party_name, narration, source_type, source_id)
+select
+  'Sales',
+  i.invoice_no,
+  i.invoice_date,
+  i.student_id,
+  i.customer_name,
+  (upper(i.billing_category) || ' Invoice'),
+  'invoice',
+  i.id
+from billing_invoices i
+where i.status <> 'void'
+on conflict (source_type, source_id)
+do update set
+  voucher_no = excluded.voucher_no,
+  voucher_date = excluded.voucher_date,
+  party_student_id = excluded.party_student_id,
+  party_name = excluded.party_name,
+  narration = excluded.narration,
+  updated_at = now();
+
+insert into accounting_vouchers (voucher_type, voucher_no, voucher_date, party_student_id, party_name, narration, source_type, source_id)
+select
+  'Receipt',
+  r.receipt_no,
+  r.receipt_date,
+  r.student_id,
+  s.full_name,
+  coalesce(nullif(r.narration, ''), 'Receipt'),
+  'receipt',
+  r.id
+from receipts r
+join students s on s.id = r.student_id
+on conflict (source_type, source_id)
+do update set
+  voucher_no = excluded.voucher_no,
+  voucher_date = excluded.voucher_date,
+  party_student_id = excluded.party_student_id,
+  party_name = excluded.party_name,
+  narration = excluded.narration,
+  updated_at = now();
+
+-- Rebuild derived lines for invoice/receipt vouchers (safe and deterministic)
+delete from accounting_voucher_lines l
+using accounting_vouchers v
+where l.voucher_id = v.id
+  and v.source_type in ('invoice', 'receipt');
+
+-- Invoice postings:
+-- Dr Debtors Control (total)
+-- Cr Sales (subtotal)
+-- Cr Output GST (gst) when gst > 0
+insert into accounting_voucher_lines (voucher_id, ledger_code, debit, credit)
+select v.id, 'DEBTORS_CTRL', i.total_amount, 0
+from accounting_vouchers v
+join billing_invoices i on v.source_id = i.id
+where v.source_type = 'invoice'
+  and i.status <> 'void'
+  and i.total_amount > 0;
+
+insert into accounting_voucher_lines (voucher_id, ledger_code, debit, credit)
+select v.id, 'SALES', 0, i.subtotal_amount
+from accounting_vouchers v
+join billing_invoices i on v.source_id = i.id
+where v.source_type = 'invoice'
+  and i.status <> 'void'
+  and i.subtotal_amount > 0;
+
+insert into accounting_voucher_lines (voucher_id, ledger_code, debit, credit)
+select v.id, 'OUTPUT_GST', 0, i.gst_amount
+from accounting_vouchers v
+join billing_invoices i on v.source_id = i.id
+where v.source_type = 'invoice'
+  and i.status <> 'void'
+  and i.gst_amount > 0;
+
+-- Receipt postings:
+-- Dr Cash/Bank/UPI/Card depending on payment_mode
+-- Cr Debtors Control
+insert into accounting_voucher_lines (voucher_id, ledger_code, debit, credit)
+select
+  v.id,
+  case r.payment_mode
+    when 'cash' then 'CASH'
+    when 'bank' then 'BANK'
+    when 'upi' then 'UPI'
+    when 'card' then 'CARD'
+    else 'BANK'
+  end as ledger_code,
+  r.amount,
+  0
+from accounting_vouchers v
+join receipts r on v.source_id = r.id
+where v.source_type = 'receipt'
+  and r.amount > 0;
+
+insert into accounting_voucher_lines (voucher_id, ledger_code, debit, credit)
+select v.id, 'DEBTORS_CTRL', 0, r.amount
+from accounting_vouchers v
+join receipts r on v.source_id = r.id
+where v.source_type = 'receipt'
+  and r.amount > 0;
+
 -- Library shifts (minimal)
 create table if not exists library_shifts (
   id uuid primary key default gen_random_uuid(),

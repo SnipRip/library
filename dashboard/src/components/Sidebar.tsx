@@ -143,6 +143,46 @@ export default function Sidebar() {
                                         Balance Sheet
                                     </Link>
                                 </li>
+                                <li className={styles.subMenuItem}>
+                                    <Link
+                                        href="/reports/profit-loss"
+                                        className={`${styles.subMenuLink} ${isActive('/reports/profit-loss') ? styles.subMenuLinkActive : ''}`}
+                                    >
+                                        Profit &amp; Loss
+                                    </Link>
+                                </li>
+                                <li className={styles.subMenuItem}>
+                                    <Link
+                                        href="/reports/cash-bank-book"
+                                        className={`${styles.subMenuLink} ${isActive('/reports/cash-bank-book') ? styles.subMenuLinkActive : ''}`}
+                                    >
+                                        Cash/Bank Book
+                                    </Link>
+                                </li>
+                                <li className={styles.subMenuItem}>
+                                    <Link
+                                        href="/reports/trial-balance"
+                                        className={`${styles.subMenuLink} ${isActive('/reports/trial-balance') ? styles.subMenuLinkActive : ''}`}
+                                    >
+                                        Trial Balance
+                                    </Link>
+                                </li>
+                                <li className={styles.subMenuItem}>
+                                    <Link
+                                        href="/reports/ledger"
+                                        className={`${styles.subMenuLink} ${isActive('/reports/ledger') ? styles.subMenuLinkActive : ''}`}
+                                    >
+                                        Ledger
+                                    </Link>
+                                </li>
+                                <li className={styles.subMenuItem}>
+                                    <Link
+                                        href="/reports/company-ledger"
+                                        className={`${styles.subMenuLink} ${isActive('/reports/company-ledger') ? styles.subMenuLinkActive : ''}`}
+                                    >
+                                        Company Ledger
+                                    </Link>
+                                </li>
                             </ul>
                         )}
                     </li>
