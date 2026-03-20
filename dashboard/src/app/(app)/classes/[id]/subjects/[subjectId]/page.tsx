@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import TopNav from '@/components/TopNav';
 import { API_BASE_URL } from '@/lib/api';
+import { getAuthToken } from '@/lib/auth';
 import { AddSubjectMaterialModal } from '@/components/modals/Modals';
 import styles from './materials.module.css';
 
@@ -60,7 +61,7 @@ export default function SubjectMaterialsPage() {
     const [saving, setSaving] = useState(false);
 
     const loadAll = async (signal: AbortSignal) => {
-        const token = localStorage.getItem('token');
+        const token = getAuthToken();
         if (!token) {
             setSubject(null);
             setMaterials([]);
@@ -103,7 +104,7 @@ export default function SubjectMaterialsPage() {
     }, [classId, subjectId]);
 
     const addMaterial = async (data: { title: string; url: string; description?: string; thumbnailUrl?: string; thumbnailFile?: File }) => {
-        const token = localStorage.getItem('token');
+        const token = getAuthToken();
         if (!token) {
             alert('Please login again');
             return;

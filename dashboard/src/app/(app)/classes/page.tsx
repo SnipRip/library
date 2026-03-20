@@ -8,6 +8,7 @@ import TopNav from '@/components/TopNav';
 import styles from './classes.module.css';
 import { AddBatchModal, EditClassCardThumbnailModal } from '@/components/modals/Modals';
 import { API_BASE_URL } from '@/lib/api';
+import { getAuthToken } from '@/lib/auth';
 
 type WeeklyScheduleEntry = {
     day_of_week: number;
@@ -45,7 +46,7 @@ async function loadClasses(
     bumpImageVersion?: () => void,
 ) {
     try {
-        const token = localStorage.getItem('token');
+        const token = getAuthToken();
         if (!token) {
             setClasses([]);
             return;

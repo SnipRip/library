@@ -5,6 +5,7 @@ import styles from './page.module.css';
 import TopNav from '@/components/TopNav';
 import { AddStudentModal } from '@/components/modals/Modals';
 import { API_BASE_URL } from '@/lib/api';
+import { getAuthToken } from '@/lib/auth';
 
 interface Student {
     id: string;
@@ -17,7 +18,8 @@ interface Student {
 
 async function loadStudents(setStudents: React.Dispatch<React.SetStateAction<Student[]>>) {
     try {
-        const token = localStorage.getItem('token');
+        const token = getAuthToken();
+        if (!token) return;
         const res = await fetch(`${API_BASE_URL}/students`, {
             headers: { Authorization: `Bearer ${token}` },
         });

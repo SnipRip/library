@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import TopNav from '@/components/TopNav';
 import PasswordStrength from '@/components/PasswordStrength';
 import { API_BASE_URL } from '@/lib/api';
+import { clearAuthToken, getAuthToken } from '@/lib/auth';
 import styles from './user-admin.module.css';
 
 type Me = {
@@ -36,11 +37,7 @@ export default function UserAdminSetupPage() {
   const [emailAddress, setEmailAddress] = useState('');
 
   const token = useMemo(() => {
-    try {
-      return localStorage.getItem('token');
-    } catch {
-      return null;
-    }
+    return getAuthToken();
   }, []);
 
   useEffect(() => {
@@ -139,7 +136,7 @@ export default function UserAdminSetupPage() {
 
       // Popup + force re-login
       alert('Default admin credentials changed. Please login again with your new credentials.');
-      localStorage.removeItem('token');
+      clearAuthToken();
       router.replace('/auth/login');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Update failed';

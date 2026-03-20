@@ -17,6 +17,7 @@ import {
 } from '@/components/modals/Modals';
 import LibrarySettingsModal from '@/components/modals/LibrarySettingsModal';
 import { API_BASE_URL } from '@/lib/api';
+import { getAuthToken } from '@/lib/auth';
 
 interface Seat {
   id: string;
@@ -58,7 +59,8 @@ async function loadSeats(
   shiftId: string | null,
 ) {
   try {
-    const token = localStorage.getItem('token');
+    const token = getAuthToken();
+    if (!token) return;
     const url = shiftId
       ? `${API_BASE_URL}/library/seats?shift_id=${encodeURIComponent(shiftId)}`
       : `${API_BASE_URL}/library/seats`;
@@ -75,7 +77,8 @@ async function loadSeats(
 
 async function loadShifts(setShifts: React.Dispatch<React.SetStateAction<Shift[]>>) {
   try {
-    const token = localStorage.getItem('token');
+    const token = getAuthToken();
+    if (!token) return;
     const res = await fetch(`${API_BASE_URL}/library/shifts`, {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -89,7 +92,8 @@ async function loadShifts(setShifts: React.Dispatch<React.SetStateAction<Shift[]
 
 async function loadHalls(setHalls: React.Dispatch<React.SetStateAction<Hall[]>>) {
   try {
-    const token = localStorage.getItem('token');
+    const token = getAuthToken();
+    if (!token) return;
     const res = await fetch(`${API_BASE_URL}/library/halls`, {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -103,7 +107,8 @@ async function loadHalls(setHalls: React.Dispatch<React.SetStateAction<Hall[]>>)
 
 async function loadSeatTypes(setSeatTypes: React.Dispatch<React.SetStateAction<SeatType[]>>) {
   try {
-    const token = localStorage.getItem('token');
+    const token = getAuthToken();
+    if (!token) return;
     const res = await fetch(`${API_BASE_URL}/library/seat-types`, {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -147,7 +152,8 @@ export default function LibraryPage() {
 
   async function refreshSeats(shiftIdOverride?: string | null) {
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken();
+      if (!token) return;
       const shiftToUse = shiftIdOverride ?? effectiveShiftId;
       const url = shiftToUse
         ? `${API_BASE_URL}/library/seats?shift_id=${encodeURIComponent(shiftToUse)}`
@@ -182,7 +188,8 @@ export default function LibraryPage() {
 
   const updateSeatStatus = async (seatId: string, status: Seat['status']) => {
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken();
+      if (!token) return;
       const res = await fetch(`${API_BASE_URL}/library/seats/${seatId}`, {
         method: 'PATCH',
         headers: {
@@ -207,7 +214,8 @@ export default function LibraryPage() {
 
   const vacateSeat = async (seat: Seat) => {
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken();
+      if (!token) return;
       const res = await fetch(`${API_BASE_URL}/library/seats/${seat.id}/vacate`, {
         method: 'POST',
         headers: {
@@ -232,7 +240,8 @@ export default function LibraryPage() {
 
   const deleteSeat = async (seatId: string) => {
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken();
+      if (!token) return;
       const res = await fetch(`${API_BASE_URL}/library/seats/${seatId}`, {
         method: 'DELETE',
         headers: {
@@ -261,7 +270,8 @@ export default function LibraryPage() {
 
   const deleteShift = async (shiftId: string) => {
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken();
+      if (!token) return;
       const res = await fetch(`${API_BASE_URL}/library/shifts/${shiftId}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
@@ -282,7 +292,8 @@ export default function LibraryPage() {
 
   const deleteHall = async (hallId: string) => {
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken();
+      if (!token) return;
       const res = await fetch(`${API_BASE_URL}/library/halls/${hallId}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },

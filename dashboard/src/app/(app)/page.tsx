@@ -7,6 +7,7 @@ import { AddStudentModal } from "@/components/modals/Modals";
 
 import SeatStatus from "@/components/dashboard/SeatStatus";
 import { API_BASE_URL } from "@/lib/api";
+import { getAuthToken } from "@/lib/auth";
 
 type Seat = {
   id: string;
@@ -30,7 +31,7 @@ export default function Dashboard() {
 
     async function loadOverview() {
       try {
-        const token = localStorage.getItem("token");
+        const token = getAuthToken();
         if (!token) return;
 
         const [seatsRes, classesRes] = await Promise.all([

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import PasswordStrength from '@/components/PasswordStrength';
 import { API_BASE_URL } from '@/lib/api';
+import { getAuthToken } from '@/lib/auth';
 
 export default function ProfilePage() {
   const [username, setUsername] = useState('');
@@ -20,7 +21,8 @@ export default function ProfilePage() {
   useEffect(() => {
     (async () => {
       try {
-        const token = localStorage.getItem('token');
+        const token = getAuthToken();
+        if (!token) return;
         const res = await fetch(`${API_BASE_URL}/me`, { headers: { Authorization: `Bearer ${token}` } });
         if (!res.ok) return;
         const body = await res.json();
@@ -44,7 +46,8 @@ export default function ProfilePage() {
     const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (email && !emailRe.test(email)) { setMsg('Invalid email format'); setLoading(false); return; }
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken();
+      if (!token) throw new Error('No token');
       const res = await fetch(`${API_BASE_URL}/me`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -63,7 +66,8 @@ export default function ProfilePage() {
     if (!currentPassword || !newPassword) { setMsg('Provide both passwords'); return; }
     setLoading(true); setMsg('');
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken();
+      if (!token) throw new Error('No token');
       const res = await fetch(`${API_BASE_URL}/me/password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },

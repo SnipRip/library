@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import TopNav from "@/components/TopNav";
 import styles from "./company-ledger.module.css";
 import { API_BASE_URL } from "@/lib/api";
+import { getAuthToken } from "@/lib/auth";
 
 type CompanyLedgerEntry = {
   date: string;
@@ -66,7 +67,7 @@ export default function CompanyLedgerReportPage() {
   }, [data]);
 
   const loadReport = async () => {
-    const token = localStorage.getItem("token");
+    const token = getAuthToken();
     if (!token) {
       setError("Please login again");
       return;

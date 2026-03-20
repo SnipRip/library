@@ -3,7 +3,16 @@
 import { useEffect, useState } from 'react';
 import styles from './Modal.module.css';
 import { API_BASE_URL } from '@/lib/api';
+import { getAuthToken } from '@/lib/auth';
 import Cropper, { type Area } from 'react-easy-crop';
+
+// NOTE: This file historically read the auth token from persistent localStorage.
+// We now want refresh to keep the session but tab-close to log out, so the token
+// must come from sessionStorage. Shadow `localStorage.getItem('token')` locally
+// to preserve the existing call sites.
+const localStorage = {
+    getItem: (key: string): string | null => (key === 'token' ? getAuthToken() : null),
+};
 
 const CLASS_THUMBNAIL_VIEWBOX_WIDTH = 300;
 const CLASS_THUMBNAIL_VIEWBOX_HEIGHT = 160;

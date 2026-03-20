@@ -5,6 +5,7 @@ import TopNav from "@/components/TopNav";
 import styles from "../library.module.css";
 import { API_BASE_URL } from "@/lib/api";
 import LockerSettingsModal from "@/components/modals/LockerSettingsModal";
+import { getAuthToken } from "@/lib/auth";
 
 interface StudentMini {
   id: string;
@@ -27,7 +28,8 @@ interface LockerRow {
 
 async function loadStudents(setStudents: React.Dispatch<React.SetStateAction<StudentMini[]>>) {
   try {
-    const token = localStorage.getItem("token");
+    const token = getAuthToken();
+    if (!token) return;
     const res = await fetch(`${API_BASE_URL}/students`, {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -41,7 +43,8 @@ async function loadStudents(setStudents: React.Dispatch<React.SetStateAction<Stu
 
 async function loadLockerSettings(setSettings: React.Dispatch<React.SetStateAction<LockerSettings>>) {
   try {
-    const token = localStorage.getItem("token");
+    const token = getAuthToken();
+    if (!token) return;
     const res = await fetch(`${API_BASE_URL}/library/lockers/settings`, {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -60,7 +63,8 @@ async function loadLockerSettings(setSettings: React.Dispatch<React.SetStateActi
 
 async function loadLockers(setLockers: React.Dispatch<React.SetStateAction<LockerRow[]>>) {
   try {
-    const token = localStorage.getItem("token");
+    const token = getAuthToken();
+    if (!token) return;
     const res = await fetch(`${API_BASE_URL}/library/lockers`, {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -108,7 +112,11 @@ export default function LibraryLockersPage() {
 
   const saveLockerSettings = async (next: LockerSettings) => {
     try {
-      const token = localStorage.getItem("token");
+      const token = getAuthToken();
+      if (!token) {
+        alert("Please login again");
+        return;
+      }
       const res = await fetch(`${API_BASE_URL}/library/lockers/settings`, {
         method: "PUT",
         headers: {
@@ -144,7 +152,11 @@ export default function LibraryLockersPage() {
 
     setAssigning(true);
     try {
-      const token = localStorage.getItem("token");
+      const token = getAuthToken();
+      if (!token) {
+        alert("Please login again");
+        return;
+      }
       const res = await fetch(`${API_BASE_URL}/library/lockers/assignments`, {
         method: "POST",
         headers: {
@@ -178,7 +190,11 @@ export default function LibraryLockersPage() {
 
     setEnding(true);
     try {
-      const token = localStorage.getItem("token");
+      const token = getAuthToken();
+      if (!token) {
+        alert("Please login again");
+        return;
+      }
       const res = await fetch(`${API_BASE_URL}/library/lockers/assignments/${selectedLocker.assignment_id}/end`, {
         method: "PATCH",
         headers: {

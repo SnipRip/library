@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import TopNav from '@/components/TopNav';
 import styles from './billing.module.css';
 import { API_BASE_URL } from '@/lib/api';
+import { getAuthToken } from '@/lib/auth';
 
 type BillingInvoiceRow = {
     id: string;
@@ -25,7 +26,7 @@ export default function BillingPage() {
     useEffect(() => {
         const controller = new AbortController();
         (async () => {
-            const token = localStorage.getItem('token');
+            const token = getAuthToken();
             if (!token) {
                 setRows([]);
                 setLoading(false);

@@ -8,6 +8,7 @@ import Link from 'next/link';
 import TopNav from '@/components/TopNav';
 import styles from './details.module.css';
 import { API_BASE_URL } from '@/lib/api';
+import { getAuthToken } from '@/lib/auth';
 import {
     AddSubjectModal,
     AddSubpartModal,
@@ -115,7 +116,7 @@ async function loadClassById(
     setClassRow: React.Dispatch<React.SetStateAction<ClassRow | null | undefined>>,
 ) {
     try {
-        const token = localStorage.getItem('token');
+        const token = getAuthToken();
         if (!token) {
             setClassRow(null);
             return;
@@ -153,7 +154,7 @@ async function loadSubjectsByClassId(
     try {
         setError(null);
 
-        const token = localStorage.getItem('token');
+        const token = getAuthToken();
         if (!token) {
             setSubjects(null);
             return;
@@ -189,7 +190,7 @@ async function loadTopicsBySubjectId(
     subjectId: string,
     signal: AbortSignal,
 ): Promise<TopicRow[]> {
-    const token = localStorage.getItem('token');
+    const token = getAuthToken();
     if (!token) return [];
     const res = await fetch(`${API_BASE_URL}/classes/${classId}/subjects/${subjectId}/topics`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -205,7 +206,7 @@ async function loadPartsByTopicId(
     topicId: string,
     signal: AbortSignal,
 ): Promise<TopicPartRow[]> {
-    const token = localStorage.getItem('token');
+    const token = getAuthToken();
     if (!token) return [];
     const res = await fetch(`${API_BASE_URL}/classes/${classId}/topics/${topicId}/parts`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -280,7 +281,7 @@ export default function ClassDetailsPage() {
 
     const handleAddSubject = async (name: string) => {
         if (!classId) return;
-        const token = localStorage.getItem('token');
+        const token = getAuthToken();
         if (!token) {
             alert('Please login again');
             return;
@@ -332,7 +333,7 @@ export default function ClassDetailsPage() {
 
     const reorderSubjects = async (next: SubjectRow[]) => {
         if (!classId) return;
-        const token = localStorage.getItem('token');
+        const token = getAuthToken();
         if (!token) return;
 
         setSubjects(next);
@@ -359,7 +360,7 @@ export default function ClassDetailsPage() {
     const removeSubject = async (subject: SubjectRow) => {
         if (!classId) return;
         if (!confirm(`Remove subject "${subject.name}"?`)) return;
-        const token = localStorage.getItem('token');
+        const token = getAuthToken();
         if (!token) return;
 
         try {
@@ -387,7 +388,7 @@ export default function ClassDetailsPage() {
     const handleAddTopic = async (name: string) => {
         if (!classId) return;
         if (!activeSubjectForAdd) return;
-        const token = localStorage.getItem('token');
+        const token = getAuthToken();
         if (!token) {
             alert('Please login again');
             return;
@@ -438,7 +439,7 @@ export default function ClassDetailsPage() {
 
     const toggleTopicCompleted = async (topic: TopicRow, isCompleted: boolean) => {
         if (!classId) return;
-        const token = localStorage.getItem('token');
+        const token = getAuthToken();
         if (!token) return;
         setTogglingId(topic.id);
         try {
@@ -470,7 +471,7 @@ export default function ClassDetailsPage() {
     const handleAddSubpart = async (name: string) => {
         if (!classId) return;
         if (!activeTopicForAdd) return;
-        const token = localStorage.getItem('token');
+        const token = getAuthToken();
         if (!token) {
             alert('Please login again');
             return;
@@ -501,7 +502,7 @@ export default function ClassDetailsPage() {
 
     const togglePartCompleted = async (part: TopicPartRow, isCompleted: boolean) => {
         if (!classId) return;
-        const token = localStorage.getItem('token');
+        const token = getAuthToken();
         if (!token) return;
         setTogglingId(part.id);
         try {
@@ -532,7 +533,7 @@ export default function ClassDetailsPage() {
 
     const reorderTopics = async (subjectId: string, next: TopicRow[]) => {
         if (!classId) return;
-        const token = localStorage.getItem('token');
+        const token = getAuthToken();
         if (!token) return;
 
         setTopicsBySubject((p) => ({ ...p, [subjectId]: next }));
@@ -559,7 +560,7 @@ export default function ClassDetailsPage() {
     const removeTopic = async (topic: TopicRow) => {
         if (!classId) return;
         if (!confirm(`Remove chapter "${topic.name}"?`)) return;
-        const token = localStorage.getItem('token');
+        const token = getAuthToken();
         if (!token) return;
 
         try {
@@ -587,7 +588,7 @@ export default function ClassDetailsPage() {
 
     const reorderParts = async (topicId: string, next: TopicPartRow[]) => {
         if (!classId) return;
-        const token = localStorage.getItem('token');
+        const token = getAuthToken();
         if (!token) return;
 
         setTopicPartsByTopic((p) => ({ ...p, [topicId]: next }));
@@ -614,7 +615,7 @@ export default function ClassDetailsPage() {
     const removePart = async (part: TopicPartRow) => {
         if (!classId) return;
         if (!confirm(`Remove subpart "${part.name}"?`)) return;
-        const token = localStorage.getItem('token');
+        const token = getAuthToken();
         if (!token) return;
 
         try {

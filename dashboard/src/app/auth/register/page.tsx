@@ -4,6 +4,7 @@ import { useState } from "react";
 import PasswordStrength from '@/components/PasswordStrength';
 import { useRouter } from "next/navigation";
 import { API_BASE_URL } from '@/lib/api';
+import { setAuthToken } from "@/lib/auth";
 
 export default function RegisterPage() {
   const [username, setUsername] = useState('');
@@ -32,7 +33,7 @@ export default function RegisterPage() {
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.message || 'Registration failed');
-      localStorage.setItem('token', body.token);
+      setAuthToken(body.token);
       router.push('/');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);

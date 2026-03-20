@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import TopNav from '@/components/TopNav';
 import { API_BASE_URL } from '@/lib/api';
+import { getAuthToken } from '@/lib/auth';
 import styles from './company.module.css';
 
 type Company = {
@@ -121,11 +122,7 @@ export default function CompanySettingsPage() {
   const [websites, setWebsites] = useState<string[]>([]);
 
   const token = useMemo(() => {
-    try {
-      return localStorage.getItem('token');
-    } catch {
-      return null;
-    }
+    return getAuthToken();
   }, []);
 
   useEffect(() => {

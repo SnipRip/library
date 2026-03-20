@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import styles from './SeatStatus.module.css';
 import { API_BASE_URL } from '@/lib/api';
+import { getAuthToken } from '@/lib/auth';
 
 interface Seat {
     id: string;
@@ -18,7 +19,7 @@ export default function SeatStatus() {
 
         async function load() {
             try {
-                const token = localStorage.getItem('token');
+                const token = getAuthToken();
                 if (!token) return;
 
                 const res = await fetch(`${API_BASE_URL}/library/seats`, {

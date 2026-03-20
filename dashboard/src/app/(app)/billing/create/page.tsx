@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import styles from './create.module.css';
 import { DraftInvoice, INVOICE_DRAFT_STORAGE_KEY, makeInvoiceNo, todayISODate } from '@/lib/invoiceDraft';
 import { API_BASE_URL } from '@/lib/api';
+import { getAuthToken } from '@/lib/auth';
 
 const BILLING_PREFS_KEY = 'companyBillingPrefs:v1';
 
@@ -55,7 +56,7 @@ type LoadedInvoice = {
 };
 
 async function fetchStudents(signal?: AbortSignal): Promise<Student[]> {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+    const token = getAuthToken();
     if (!token) return [];
 
     const res = await fetch(`${API_BASE_URL}/students`, {
@@ -125,7 +126,7 @@ export default function CreateInvoicePage() {
         const controller = new AbortController();
 
         (async () => {
-            const token = localStorage.getItem('token');
+            const token = getAuthToken();
             if (!token) return;
 
             const res = await fetch(
@@ -231,7 +232,7 @@ export default function CreateInvoicePage() {
 
         const controller = new AbortController();
         (async () => {
-            const token = localStorage.getItem('token');
+            const token = getAuthToken();
             if (!token) return;
 
             setLoadingInvoice(true);
@@ -310,7 +311,7 @@ export default function CreateInvoicePage() {
         sessionStorage.setItem(INVOICE_DRAFT_STORAGE_KEY, JSON.stringify(draft));
 
         try {
-            const token = localStorage.getItem('token');
+            const token = getAuthToken();
             if (token) {
                 const url = invoiceId ? `${API_BASE_URL}/billing/invoices/${encodeURIComponent(invoiceId)}` : `${API_BASE_URL}/billing/invoices`;
                 const method = invoiceId ? 'PUT' : 'POST';

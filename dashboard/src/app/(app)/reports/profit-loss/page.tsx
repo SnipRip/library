@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import TopNav from "@/components/TopNav";
 import styles from "./profit-loss.module.css";
 import { API_BASE_URL } from "@/lib/api";
+import { getAuthToken } from "@/lib/auth";
 
 type ProfitLossEntry = {
   ledgerCode: string;
@@ -64,7 +65,7 @@ export default function ProfitLossPage() {
   }, [data]);
 
   const loadReport = async (signal?: AbortSignal) => {
-    const token = localStorage.getItem("token");
+    const token = getAuthToken();
     if (!token) {
       setError("Please login again");
       return;

@@ -6,6 +6,7 @@ import styles from "./cash-bank-book.module.css";
 import { API_BASE_URL } from "@/lib/api";
 import UniversalModal from "@/components/modals/UniversalModal";
 import modalStyles from "@/components/modals/Modal.module.css";
+import { getAuthToken } from "@/lib/auth";
 
 type BookEntry = {
   date: string;
@@ -82,7 +83,7 @@ export default function CashBankBookPage() {
   }, [data]);
 
   const loadBook = async () => {
-    const token = localStorage.getItem("token");
+    const token = getAuthToken();
     if (!token) {
       setError("Please login again");
       return;
@@ -123,7 +124,7 @@ export default function CashBankBookPage() {
 
   const saveExpense = async (e: React.FormEvent) => {
     e.preventDefault();
-    const token = localStorage.getItem("token");
+    const token = getAuthToken();
     if (!token) {
       setError("Please login again");
       return;

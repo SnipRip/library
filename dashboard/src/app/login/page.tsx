@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import styles from "../auth/login/login.module.css";
 import { DottedGlowBackground } from "@/components/ui/dotted-glow-background";
 import { API_BASE_URL } from "@/lib/api";
+import { setAuthToken } from "@/lib/auth";
 
 export default function LoginPageStandalone() {
   const [email, setEmail] = useState("");
@@ -26,7 +27,7 @@ export default function LoginPageStandalone() {
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.message || "Login failed");
-      if (typeof window !== "undefined") localStorage.setItem("token", body.token);
+      setAuthToken(body.token);
       // redirect to dashboard after successful login
       router.push("/");
     } catch (err: unknown) {

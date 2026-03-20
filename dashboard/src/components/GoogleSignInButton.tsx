@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { API_BASE_URL } from '@/lib/api';
+import { setAuthToken } from '@/lib/auth';
 
 type GoogleCredentialResponse = {
   credential?: string;
@@ -93,7 +94,7 @@ export default function GoogleSignInButton({
               });
               const b = await r.json().catch(() => ({}));
               if (!r.ok) throw new Error(b.message || 'Google sign-in failed');
-              localStorage.setItem('token', b.token);
+              setAuthToken(b.token);
               router.push('/');
             } catch (e: unknown) {
               const msg = e instanceof Error ? e.message : 'Google sign-in failed';

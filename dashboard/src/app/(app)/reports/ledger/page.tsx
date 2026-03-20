@@ -5,6 +5,7 @@ import TopNav from "@/components/TopNav";
 import UniversalModal from "@/components/modals/UniversalModal";
 import styles from "./ledger.module.css";
 import { API_BASE_URL } from "@/lib/api";
+import { getAuthToken } from "@/lib/auth";
 import modalStyles from "@/components/modals/Modal.module.css";
 
 type StudentRow = {
@@ -81,7 +82,7 @@ export default function LedgerReportPage() {
   const [savingReceipt, setSavingReceipt] = useState(false);
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
+    const token = getAuthToken();
     if (!token) {
       setStudents([]);
       return;
@@ -121,7 +122,7 @@ export default function LedgerReportPage() {
   }, [data]);
 
   const loadLedger = async () => {
-    const token = localStorage.getItem("token");
+    const token = getAuthToken();
     if (!token) {
       setError("Please login again");
       return;
@@ -162,7 +163,7 @@ export default function LedgerReportPage() {
 
   const saveReceipt = async (e: React.FormEvent) => {
     e.preventDefault();
-    const token = localStorage.getItem("token");
+    const token = getAuthToken();
     if (!token) {
       setError("Please login again");
       return;

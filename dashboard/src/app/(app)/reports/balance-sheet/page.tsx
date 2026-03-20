@@ -5,6 +5,7 @@ import TopNav from "@/components/TopNav";
 import styles from "./balance-sheet.module.css";
 import modalStyles from "@/components/modals/Modal.module.css";
 import { API_BASE_URL } from "@/lib/api";
+import { getAuthToken } from "@/lib/auth";
 
 type BalanceType = "Dr" | "Cr";
 
@@ -58,7 +59,7 @@ export default function BalanceSheetPage() {
   }, [data]);
 
   const loadReport = async (signal?: AbortSignal) => {
-    const token = localStorage.getItem("token");
+    const token = getAuthToken();
     if (!token) {
       setError("Please login again");
       return;

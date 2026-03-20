@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { usePathname } from 'next/navigation';
 import { API_BASE_URL } from '@/lib/api';
+import { clearAuthToken, getAuthToken } from "@/lib/auth";
 
 const DEV_ADMIN_TOKEN = "dev-admin-token";
 
@@ -17,7 +18,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
     async function run() {
       try {
-        const token = localStorage.getItem('token');
+        const token = getAuthToken();
         if (!token) {
           router.replace('/auth/login');
           return;
@@ -33,14 +34,14 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!meRes.ok) {
-          localStorage.removeItem('token');
+          clearAuthToken();
           router.replace('/auth/login');
           return;
         }
         await meRes.json().catch(() => null);
         if (!cancelled) setReady(true);
       } catch {
-        localStorage.removeItem('token');
+        clearAuthToken();
         router.replace('/auth/login');
       }
     }
