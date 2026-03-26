@@ -25,3 +25,7 @@ Thumbs.db
 
 # TypeScript
 *.tsbuildinfo
+
+# Runtime uploads (never commit)
+server/Uploads/
+server/uploads/

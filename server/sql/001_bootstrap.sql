@@ -27,6 +27,30 @@ create table if not exists sessions (
 create index if not exists idx_sessions_token on sessions (token);
 create index if not exists idx_sessions_user_id on sessions (user_id);
 
+-- Company settings (single shared row)
+create table if not exists company_settings (
+  id integer primary key default 1,
+  name text not null default '',
+  profile_completed boolean not null default false,
+  address text null,
+  phone text null,
+  email text null,
+  state text null,
+  city text null,
+  pincode text null,
+  gst text null,
+  pan text null,
+  logo_url text null,
+  documents jsonb null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  check (id = 1)
+);
+
+insert into company_settings (id)
+values (1)
+on conflict (id) do nothing;
+
 -- Default credential for fresh setups
 -- Login: InDev
 -- Password: admin1234
