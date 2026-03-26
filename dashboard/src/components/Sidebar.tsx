@@ -2,9 +2,27 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import styles from './Sidebar.module.css';
 import { brandConfig } from '@/lib/config';
+import { API_BASE_URL } from '@/lib/api';
+import { getAuthToken } from '@/lib/auth';
+
+type Me = { username?: string; role?: string };
+type Company = { name?: string; logo_url?: string | null };
+
+function resolvePublicUrl(url: string): string {
+    const u = url.trim();
+    if (!u) return u;
+
+    // Already absolute or browser-local.
+    if (/^(https?:\/\/|data:|blob:)/i.test(u)) return u;
+
+    // Server typically returns /uploads/... which needs the API origin.
+    if (u.startsWith('/')) return `${API_BASE_URL}${u}`;
+
+    return `${API_BASE_URL}/${u}`;
+}
 
 export default function Sidebar() {
     const pathname = usePathname();
@@ -21,15 +39,78 @@ export default function Sidebar() {
 
     const isActiveExact = (path: string) => pathname === path;
 
+    const [me, setMe] = useState<Me | null>(null);
+    const [companyLogoUrl, setCompanyLogoUrl] = useState<string | null>(null);
+    const [companyName, setCompanyName] = useState<string | null>(null);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        async function loadHeaderData() {
+            const token = getAuthToken();
+            if (!token) return;
+
+            const headers = { Authorization: `Bearer ${token}` };
+
+            const [meRes, companyRes] = await Promise.allSettled([
+                fetch(`${API_BASE_URL}/me`, { headers }),
+                fetch(`${API_BASE_URL}/company`, { headers }),
+            ]);
+
+            if (!cancelled && meRes.status === 'fulfilled' && meRes.value.ok) {
+                const body = (await meRes.value.json().catch(() => null)) as Me | null;
+                if (body) setMe(body);
+            }
+
+            if (!cancelled && companyRes.status === 'fulfilled' && companyRes.value.ok) {
+                const body = (await companyRes.value.json().catch(() => null)) as Company | null;
+                const url = typeof body?.logo_url === 'string' ? body.logo_url : '';
+                const resolved = url ? resolvePublicUrl(url) : null;
+                if (resolved) setCompanyLogoUrl(resolved);
+
+                const name = typeof body?.name === 'string' ? body.name.trim() : '';
+                if (name) setCompanyName(name);
+            }
+        }
+
+        loadHeaderData();
+
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    const secondaryLine = useMemo(() => {
+        const username = (me?.username || '').trim();
+        const role = (me?.role || '').trim();
+        if (!username) return brandConfig.phone;
+        return role ? `${username} (${role})` : username;
+    }, [me]);
+
+    const primaryLine = useMemo(() => {
+        return (companyName || '').trim() || brandConfig.name;
+    }, [companyName]);
+
     return (
         <aside className={styles.sidebar}>
             <div className={styles.headerGroup}>
                 {/* Brand Header */}
                 <div className={styles.brand}>
-                    <div className={styles.brandAvatar}>{brandConfig.logo}</div>
+                    <div className={`${styles.brandAvatar} ${companyLogoUrl ? styles.brandAvatarImage : styles.brandAvatarFallback}`}>
+                        {companyLogoUrl ? (
+                            <img
+                                className={styles.brandAvatarImg}
+                                src={companyLogoUrl}
+                                alt="Company logo"
+                                onError={() => setCompanyLogoUrl(null)}
+                            />
+                        ) : (
+                            brandConfig.logo
+                        )}
+                    </div>
                     <div className={styles.brandInfo}>
-                        <h1>{brandConfig.name}</h1>
-                        <span>{brandConfig.phone}</span>
+                        <h1>{primaryLine}</h1>
+                        <span>{secondaryLine}</span>
                     </div>
                 </div>
 

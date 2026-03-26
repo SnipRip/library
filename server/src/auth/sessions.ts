@@ -20,6 +20,7 @@ export async function getUserBySessionToken(token: string): Promise<SessionUser 
      where s.token = $1
        and s.expires_at > now()
        and u.is_active = true
+       and u.deleted_at is null
      limit 1`,
     [token],
   );

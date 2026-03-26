@@ -36,6 +36,8 @@ export default function UsersPage() {
   const [savingEdit, setSavingEdit] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [meId, setMeId] = useState<string | null>(null);
+  const [meRole, setMeRole] = useState<string | null>(null);
+  const [deletingUser, setDeletingUser] = useState(false);
 
   const sortedUsers = useMemo(() => {
     return [...users].sort((a, b) => {
@@ -78,8 +80,41 @@ export default function UsersPage() {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) return;
-    const body = (await res.json().catch(() => null)) as { id?: string } | null;
+    const body = (await res.json().catch(() => null)) as { id?: string; role?: string } | null;
     if (body?.id) setMeId(body.id);
+    if (body?.role) setMeRole(body.role);
+  }
+
+  async function deleteUser(userId: string) {
+    const token = getAuthToken();
+    if (!token) {
+      router.replace('/auth/login');
+      return;
+    }
+
+    setDeletingUser(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/users/${userId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const body = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        clearAuthToken();
+        router.replace('/auth/login');
+        return;
+      }
+      if (!res.ok) throw new Error(body.message || 'Failed to delete user');
+
+      setEditingUser(null);
+      await loadUsers();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      alert(message);
+    } finally {
+      setDeletingUser(false);
+    }
   }
 
   async function saveUserEdits(payload: {
@@ -441,6 +476,30 @@ export default function UsersPage() {
               editingUser.is_active !== false
             )
           }
+          showDelete={meRole === 'admin' || meRole === 'owner'}
+          deleting={deletingUser}
+          disableDelete={
+            !!(editingUser && meId && editingUser.id === meId) ||
+            (users.filter((u) => u.is_active !== false && (u.role === 'admin' || u.role === 'owner')).length <= 1 &&
+              !!(
+                editingUser &&
+                (editingUser.role === 'admin' || editingUser.role === 'owner') &&
+                editingUser.is_active !== false
+              ))
+          }
+          disableDeleteReason={
+            editingUser && meId && editingUser.id === meId
+              ? "You can't delete your own account."
+              : users.filter((u) => u.is_active !== false && (u.role === 'admin' || u.role === 'owner')).length <= 1 &&
+                  !!(
+                    editingUser &&
+                    (editingUser.role === 'admin' || editingUser.role === 'owner') &&
+                    editingUser.is_active !== false
+                  )
+                ? 'At least one active admin/owner must remain.'
+                : undefined
+          }
+          onDelete={(id) => void deleteUser(id)}
           onSave={(payload) => void saveUserEdits(payload)}
         />
 

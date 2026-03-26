@@ -56,6 +56,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
          (password_hash = crypt($2, password_hash)) as password_ok
        from users
        where (username = $1 or email = $1)
+         and deleted_at is null
        limit 1`,
       [identifier, password],
     );

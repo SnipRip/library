@@ -1910,6 +1910,12 @@ interface EditUserModalProps {
     disableDeactivate?: boolean;
     disableDeactivateReason?: string;
     disableMakeInactiveBecauseLastAdmin?: boolean;
+
+    showDelete?: boolean;
+    deleting?: boolean;
+    disableDelete?: boolean;
+    disableDeleteReason?: string;
+    onDelete?: (id: string) => void;
 }
 
 export function EditUserModal({
@@ -1921,6 +1927,11 @@ export function EditUserModal({
     disableDeactivate,
     disableDeactivateReason,
     disableMakeInactiveBecauseLastAdmin,
+    showDelete,
+    deleting,
+    disableDelete,
+    disableDeleteReason,
+    onDelete,
 }: EditUserModalProps) {
     const [username, setUsername] = useState('');
     const [email, setEmail] = useState('');
@@ -1978,6 +1989,8 @@ export function EditUserModal({
             documents: Array.isArray(user.documents) ? user.documents : [],
         });
     };
+
+    const canRenderDelete = !!showDelete && !!user && typeof onDelete === 'function';
 
     return (
         <BaseModal
@@ -2103,6 +2116,33 @@ export function EditUserModal({
                         : 'No attachments'}
                 </div>
             </div>
+
+            {canRenderDelete ? (
+                <div className={styles.inputGroup}>
+                    <label className={styles.label}>Delete User</label>
+                    <button
+                        type="button"
+                        className={styles.cancelBtn}
+                        disabled={!!deleting || !!disableDelete}
+                        onClick={() => {
+                            if (!user) return;
+                            if (disableDelete) return;
+                            const ok = window.confirm(
+                                'Delete this user? This will disable login but keep all history (bills/payments/etc.) intact.',
+                            );
+                            if (!ok) return;
+                            onDelete(user.id);
+                        }}
+                    >
+                        {deleting ? 'Deleting…' : 'Delete User'}
+                    </button>
+                    {disableDeleteReason ? (
+                        <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: 6 }}>
+                            {disableDeleteReason}
+                        </div>
+                    ) : null}
+                </div>
+            ) : null}
         </BaseModal>
     );
 }

@@ -27,6 +27,9 @@ alter table users add column if not exists pan text;
 alter table users add column if not exists aadhar text;
 alter table users add column if not exists documents jsonb;
 
+-- Soft delete support (keeps history intact)
+alter table users add column if not exists deleted_at timestamptz;
+
 create table if not exists sessions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references users(id) on delete cascade,

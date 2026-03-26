@@ -77,6 +77,7 @@ export async function registerUserRoutes(app: FastifyInstance) {
          aadhar,
          documents
        from users
+       where deleted_at is null
        order by created_at desc`,
     );
 
@@ -220,6 +221,7 @@ export async function registerUserRoutes(app: FastifyInstance) {
       `select count(*)::int as count
        from users
        where is_active = true
+         and deleted_at is null
          and role in ('admin', 'owner')
          and id <> $1`,
       [userId],
@@ -249,6 +251,7 @@ export async function registerUserRoutes(app: FastifyInstance) {
            documents = $14,
            updated_at = now()
          where id = $1
+           and deleted_at is null
          returning id, username, email, role, is_active, created_at, updated_at`,
         [
           userId,
@@ -286,6 +289,87 @@ export async function registerUserRoutes(app: FastifyInstance) {
       }
       req.log.error({ err }, "Failed to update user");
       return reply.code(500).send({ message: "Failed to update user" });
+    }
+  });
+
+  app.delete("/users/:id", async (req, reply) => {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });
+
+    if (auth.user.role !== "admin" && auth.user.role !== "owner") {
+      return reply.code(403).send({ message: "Forbidden" });
+    }
+
+    const paramsSchema = z.object({ id: z.string().uuid() });
+    const parsedParams = paramsSchema.safeParse(req.params);
+    if (!parsedParams.success) {
+      return reply.code(400).send({ message: "Invalid params", errors: parsedParams.error.issues });
+    }
+
+    const userId = parsedParams.data.id;
+
+    if (auth.user.id === userId) {
+      return reply.code(400).send({ message: "You cannot delete your own account" });
+    }
+
+    const pool = getPool();
+
+    await pool.query("begin");
+    try {
+      const targetRes = await pool.query(
+        `select id, role, is_active
+         from users
+         where id = $1
+           and deleted_at is null
+         limit 1`,
+        [userId],
+      );
+      const target = targetRes.rows[0] as { id: string; role: string; is_active: boolean } | undefined;
+      if (!target) {
+        await pool.query("rollback");
+        return reply.code(404).send({ message: "User not found" });
+      }
+
+      const isTargetPrivilegedActive =
+        target.is_active === true && (target.role === "admin" || target.role === "owner");
+
+      if (isTargetPrivilegedActive) {
+        const remainingPrivilegedRes = await pool.query(
+          `select count(*)::int as count
+           from users
+           where is_active = true
+             and deleted_at is null
+             and role in ('admin', 'owner')
+             and id <> $1`,
+          [userId],
+        );
+        const remaining = Number(remainingPrivilegedRes.rows[0]?.count ?? 0);
+        if (remaining === 0) {
+          await pool.query("rollback");
+          return reply.code(400).send({ message: "At least one active admin/owner must remain" });
+        }
+      }
+
+      // Soft delete: keep user row (and therefore history) intact.
+      await pool.query(
+        `update users
+         set deleted_at = now(),
+             is_active = false,
+             updated_at = now()
+         where id = $1
+           and deleted_at is null`,
+        [userId],
+      );
+
+      // Drop active sessions so the user is logged out immediately.
+      await pool.query(`delete from sessions where user_id = $1`, [userId]);
+
+      await pool.query("commit");
+      return reply.send({ ok: true });
+    } catch (err) {
+      await pool.query("rollback");
+      req.log.error({ err }, "Failed to delete user");
+      return reply.code(500).send({ message: "Failed to delete user" });
     }
   });
 }

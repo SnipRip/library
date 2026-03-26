@@ -1,11 +1,12 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import styles from "../auth/login/login.module.css";
 import { DottedGlowBackground } from "@/components/ui/dotted-glow-background";
 import { API_BASE_URL } from "@/lib/api";
 import { setAuthToken } from "@/lib/auth";
+import { brandConfig } from "@/lib/config";
 
 export default function LoginPageStandalone() {
   const [email, setEmail] = useState("");
@@ -13,7 +14,26 @@ export default function LoginPageStandalone() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [brandName, setBrandName] = useState<string>(brandConfig.name);
   const router = useRouter();
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/company/public`);
+        if (!res.ok) return;
+        const body = (await res.json().catch(() => null)) as { name?: string } | null;
+        const name = (body?.name || "").trim();
+        if (!cancelled && name) setBrandName(name);
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -56,7 +76,7 @@ export default function LoginPageStandalone() {
       />
 
       <main className={styles.container}>
-        <div className={styles.brandOutside}>Aedify Classes & Library</div>
+        <div className={styles.brandOutside}>{brandName}</div>
 
         <div className={styles.card}>
           <h1 className={styles.title}>Welcome back</h1>

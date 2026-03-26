@@ -55,6 +55,28 @@ async function ensureCompanyRow() {
 }
 
 export async function registerCompanyRoutes(app: FastifyInstance) {
+  // Public branding endpoint for pre-auth pages (e.g. login).
+  // Intentionally limited to non-sensitive fields.
+  app.get("/company/public", async (_req, reply) => {
+    await ensureCompanyRow();
+
+    const pool = getPool();
+    const res = await pool.query(
+      `select
+         name,
+         logo_url
+       from company_settings
+       where id = 1
+       limit 1`,
+    );
+
+    const row = res.rows[0] as any;
+    return reply.send({
+      name: row?.name ?? "",
+      logo_url: row?.logo_url ?? null,
+    });
+  });
+
   app.get("/company", async (req, reply) => {
     const auth = await requireAuth(req);
     if (!auth.ok) return reply.code(auth.status).send({ message: "Unauthorized" });

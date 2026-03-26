@@ -309,8 +309,7 @@ export default function CompanySettingsPage() {
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.message || 'Save failed');
 
-      setSuccess('Saved. Continue to Admin Setup.');
-      router.push('/settings/user-admin');
+      setSuccess('Saved.');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Save failed';
       setError(msg);
