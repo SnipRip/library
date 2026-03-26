@@ -15,6 +15,7 @@ import { registerLibraryRoutes } from "./routes/library.js";
 import { registerReportRoutes } from "./routes/reports.js";
 import { registerReceiptRoutes } from "./routes/receipts.js";
 import { registerStudentRoutes } from "./routes/students.js";
+import { registerUserRoutes } from "./routes/users.js";
 
 const env = getEnv();
 
@@ -50,5 +51,6 @@ await registerLibraryRoutes(app);
 await registerReportRoutes(app);
 await registerReceiptRoutes(app);
 await registerStudentRoutes(app);
+await registerUserRoutes(app);
 
 app.listen({ port: env.PORT, host: "0.0.0.0" });

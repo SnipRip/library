@@ -1870,6 +1870,243 @@ export function AddUserModal({ isOpen, onClose, onCreate }: AddUserModalProps) {
     );
 }
 
+interface EditUserModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+    user: {
+        id: string;
+        username: string;
+        email: string;
+        role: string;
+        is_active?: boolean;
+        original_name?: string;
+        first_name?: string;
+        last_name?: string;
+        address?: string;
+        phone?: string;
+        alternate_phone?: string;
+        pan?: string;
+        aadhar?: string;
+        documents?: Array<{ name: string; type: string; size: number; lastModified: number }>;
+        created_at?: string;
+    } | null;
+    onSave: (payload: {
+        id: string;
+        username: string;
+        email: string;
+        role: string;
+        is_active: boolean;
+        original_name: string;
+        first_name: string;
+        last_name: string;
+        address: string;
+        phone: string;
+        alternate_phone: string;
+        pan: string;
+        aadhar: string;
+        documents: Array<{ name: string; type: string; size: number; lastModified: number }>;
+    }) => void;
+    saving?: boolean;
+    disableDeactivate?: boolean;
+    disableDeactivateReason?: string;
+    disableMakeInactiveBecauseLastAdmin?: boolean;
+}
+
+export function EditUserModal({
+    isOpen,
+    onClose,
+    user,
+    onSave,
+    saving,
+    disableDeactivate,
+    disableDeactivateReason,
+    disableMakeInactiveBecauseLastAdmin,
+}: EditUserModalProps) {
+    const [username, setUsername] = useState('');
+    const [email, setEmail] = useState('');
+    const [originalName, setOriginalName] = useState('');
+    const [firstName, setFirstName] = useState('');
+    const [lastName, setLastName] = useState('');
+    const [address, setAddress] = useState('');
+    const [phone, setPhone] = useState('');
+    const [alternatePhone, setAlternatePhone] = useState('');
+    const [pan, setPan] = useState('');
+    const [aadhar, setAadhar] = useState('');
+    const [role, setRole] = useState('user');
+    const [isActive, setIsActive] = useState(true);
+
+    useEffect(() => {
+        if (!isOpen || !user) return;
+        setUsername(user.username || '');
+        setEmail(user.email || '');
+        setOriginalName(user.original_name || '');
+        setFirstName(user.first_name || '');
+        setLastName(user.last_name || '');
+        setAddress(user.address || '');
+        setPhone(user.phone || '');
+        setAlternatePhone(user.alternate_phone || '');
+        setPan(user.pan || '');
+        setAadhar(user.aadhar || '');
+        setRole(user.role || 'user');
+        setIsActive(user.is_active !== false);
+    }, [isOpen, user]);
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!user) return;
+        const u = username.trim();
+        const em = email.trim();
+        if (!u || !em) {
+            alert('Username and Email are required');
+            return;
+        }
+
+        onSave({
+            id: user.id,
+            username: u,
+            email: em,
+            role,
+            is_active: isActive,
+            original_name: originalName.trim(),
+            first_name: firstName.trim(),
+            last_name: lastName.trim(),
+            address: address.trim(),
+            phone: phone.trim(),
+            alternate_phone: alternatePhone.trim(),
+            pan: pan.trim(),
+            aadhar: aadhar.trim(),
+            documents: Array.isArray(user.documents) ? user.documents : [],
+        });
+    };
+
+    return (
+        <BaseModal
+            isOpen={isOpen}
+            onClose={onClose}
+            title="Edit User"
+            onSubmit={handleSubmit}
+            submitLabel={saving ? 'Saving…' : 'Save Changes'}
+            submitDisabled={!!saving || !user}
+        >
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className={styles.inputGroup}>
+                    <label className={styles.label}>Username *</label>
+                    <input
+                        type="text"
+                        className={styles.input}
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value)}
+                        required
+                    />
+                </div>
+
+                <div className={styles.inputGroup}>
+                    <label className={styles.label}>Email *</label>
+                    <input
+                        type="email"
+                        className={styles.input}
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        required
+                    />
+                </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className={styles.inputGroup}>
+                    <label className={styles.label}>Password</label>
+                    <input type="password" className={styles.input} value="********" disabled />
+                    <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: 6 }}>
+                        Password can’t be edited from here.
+                    </div>
+                </div>
+
+                <div className={styles.inputGroup}>
+                    <label className={styles.label}>Status</label>
+                    <select className={styles.select} value={isActive ? 'active' : 'inactive'} onChange={(e) => setIsActive(e.target.value === 'active')}>
+                        <option value="active">active</option>
+                        <option value="inactive" disabled={!!disableDeactivate || !!disableMakeInactiveBecauseLastAdmin}>inactive</option>
+                    </select>
+                    <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: 6 }}>
+                        Inactive users cannot log in.
+                    </div>
+                    {disableDeactivateReason ? (
+                        <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: 6 }}>
+                            {disableDeactivateReason}
+                        </div>
+                    ) : null}
+                    {disableMakeInactiveBecauseLastAdmin ? (
+                        <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: 6 }}>
+                            At least one active admin/owner must remain.
+                        </div>
+                    ) : null}
+                </div>
+            </div>
+
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Original Name</label>
+                <input type="text" className={styles.input} value={originalName} onChange={(e) => setOriginalName(e.target.value)} />
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className={styles.inputGroup}>
+                    <label className={styles.label}>First Name</label>
+                    <input type="text" className={styles.input} value={firstName} onChange={(e) => setFirstName(e.target.value)} />
+                </div>
+                <div className={styles.inputGroup}>
+                    <label className={styles.label}>Last Name</label>
+                    <input type="text" className={styles.input} value={lastName} onChange={(e) => setLastName(e.target.value)} />
+                </div>
+            </div>
+
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Address</label>
+                <textarea className={styles.textarea} value={address} onChange={(e) => setAddress(e.target.value)} rows={3} />
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className={styles.inputGroup}>
+                    <label className={styles.label}>Phone Number</label>
+                    <input type="tel" className={styles.input} value={phone} onChange={(e) => setPhone(e.target.value)} />
+                </div>
+                <div className={styles.inputGroup}>
+                    <label className={styles.label}>Alternate Number</label>
+                    <input type="tel" className={styles.input} value={alternatePhone} onChange={(e) => setAlternatePhone(e.target.value)} />
+                </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className={styles.inputGroup}>
+                    <label className={styles.label}>PAN No.</label>
+                    <input type="text" className={styles.input} value={pan} onChange={(e) => setPan(e.target.value)} />
+                </div>
+                <div className={styles.inputGroup}>
+                    <label className={styles.label}>Aadhaar No.</label>
+                    <input type="text" className={styles.input} value={aadhar} onChange={(e) => setAadhar(e.target.value)} />
+                </div>
+            </div>
+
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Role</label>
+                <select className={styles.select} value={role} onChange={(e) => setRole(e.target.value)}>
+                    <option value="user">user</option>
+                    <option value="admin">admin</option>
+                    <option value="owner">owner</option>
+                </select>
+            </div>
+
+            <div className={styles.inputGroup}>
+                <label className={styles.label}>Attachments</label>
+                <div style={{ fontSize: '0.85rem', color: '#64748b' }}>
+                    {user?.documents && user.documents.length > 0
+                        ? user.documents.map((d) => d.name).join(', ')
+                        : 'No attachments'}
+                </div>
+            </div>
+        </BaseModal>
+    );
+}
+
 interface CreateShiftModalProps {
     isOpen: boolean;
     onClose: () => void;

@@ -16,6 +16,17 @@ create table if not exists users (
   updated_at timestamptz not null default now()
 );
 
+-- Optional user profile fields used by the dashboard Users UI.
+alter table users add column if not exists original_name text;
+alter table users add column if not exists first_name text;
+alter table users add column if not exists last_name text;
+alter table users add column if not exists address text;
+alter table users add column if not exists phone text;
+alter table users add column if not exists alternate_phone text;
+alter table users add column if not exists pan text;
+alter table users add column if not exists aadhar text;
+alter table users add column if not exists documents jsonb;
+
 create table if not exists sessions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references users(id) on delete cascade,

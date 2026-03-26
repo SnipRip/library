@@ -48,17 +48,27 @@ export async function registerAuthRoutes(app: FastifyInstance) {
 
     const pool = getPool();
     const result = await pool.query(
-      `select id, username, role
+      `select
+         id,
+         username,
+         role,
+         is_active,
+         (password_hash = crypt($2, password_hash)) as password_ok
        from users
-       where is_active = true
-         and (username = $1 or email = $1)
-         and password_hash = crypt($2, password_hash)
+       where (username = $1 or email = $1)
        limit 1`,
       [identifier, password],
     );
 
-    const user = result.rows[0] as { id: string; username: string; role: string } | undefined;
-    if (!user) return reply.code(401).send({ message: "Invalid credentials" });
+    const row = result.rows[0] as
+      | { id: string; username: string; role: string; is_active: boolean; password_ok: boolean }
+      | undefined;
+
+    if (!row) return reply.code(401).send({ message: "Invalid credentials" });
+    if (!row.password_ok) return reply.code(401).send({ message: "Invalid credentials" });
+    if (!row.is_active) return reply.code(403).send({ message: "Your account is inactive. Contact an admin." });
+
+    const user = { id: row.id, username: row.username, role: row.role };
 
     const token = generateToken();
     const expiresAt = new Date(Date.now() + env.SESSION_TTL_DAYS * 24 * 60 * 60 * 1000);

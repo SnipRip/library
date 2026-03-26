@@ -1,4 +1,8 @@
+"use client";
+
+import { useRouter } from 'next/navigation';
 import styles from './TopNav.module.css';
+import { clearAuthToken } from '@/lib/auth';
 
 interface TopNavProps {
     title?: string;
@@ -6,11 +10,30 @@ interface TopNavProps {
 }
 
 export default function TopNav({ title = "Dashboard", onSettingsClick }: TopNavProps) {
+    const router = useRouter();
+
     return (
         <header className={styles.header}>
             <h2 className={styles.title}>{title}</h2>
 
             <div className={styles.controls} suppressHydrationWarning>
+                <button
+                    type="button"
+                    className={styles.iconButton}
+                    title="Logout"
+                    aria-label="Logout"
+                    onClick={() => {
+                        clearAuthToken();
+                        router.replace('/auth/login');
+                    }}
+                >
+                    <svg className={styles.icon} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6A2.25 2.25 0 005.25 5.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9l3 3-3 3" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12H9" />
+                    </svg>
+                </button>
+
                 <button
                     type="button"
                     className={styles.iconButton}

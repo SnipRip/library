@@ -294,6 +294,154 @@
   gap: 0.6rem;
 }
 
+.cropWrap {
+  border: 1px solid #e5e7eb;
+  border-radius: 1rem;
+  background: #fff;
+  padding: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.cropHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.cropTitle {
+  font-weight: 900;
+  color: var(--color-text-primary);
+}
+
+.cropActions {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.cropArea {
+  position: relative;
+  width: 100%;
+  height: 320px;
+  border-radius: 0.9rem;
+  background: #f8fafc;
+  border: 1px solid #eef2f7;
+  overflow: hidden;
+}
+
+.cropModalBody {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.cropStage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.cropHandleLayer {
+  position: absolute;
+  pointer-events: none;
+}
+
+.cropHandle,
+.cropHandleEdge {
+  position: absolute;
+  pointer-events: auto;
+}
+
+.cropHandle {
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background: var(--color-brand-primary);
+  border: 2px solid #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+.cropHandleEdge {
+  background: rgba(0, 0, 0, 0);
+}
+
+.cropHandle[data-pos='nw'] {
+  left: -7px;
+  top: -7px;
+  cursor: nwse-resize;
+}
+
+.cropHandle[data-pos='ne'] {
+  right: -7px;
+  top: -7px;
+  cursor: nesw-resize;
+}
+
+.cropHandle[data-pos='sw'] {
+  left: -7px;
+  bottom: -7px;
+  cursor: nesw-resize;
+}
+
+.cropHandle[data-pos='se'] {
+  right: -7px;
+  bottom: -7px;
+  cursor: nwse-resize;
+}
+
+.cropHandleEdge[data-pos='n'] {
+  left: 20px;
+  right: 20px;
+  top: -10px;
+  height: 20px;
+  cursor: ns-resize;
+}
+
+.cropHandleEdge[data-pos='s'] {
+  left: 20px;
+  right: 20px;
+  bottom: -10px;
+  height: 20px;
+  cursor: ns-resize;
+}
+
+.cropHandleEdge[data-pos='w'] {
+  top: 20px;
+  bottom: 20px;
+  left: -10px;
+  width: 20px;
+  cursor: ew-resize;
+}
+
+.cropHandleEdge[data-pos='e'] {
+  top: 20px;
+  bottom: 20px;
+  right: -10px;
+  width: 20px;
+  cursor: ew-resize;
+}
+
+.cropControls {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.cropLabel {
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: #64748b;
+}
+
+.cropRange {
+  width: 220px;
+  max-width: 100%;
+}
+
 .previewTitle {
   font-weight: 850;
   color: var(--color-text-primary);

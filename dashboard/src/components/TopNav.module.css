@@ -25,6 +25,22 @@
     gap: 1rem;
 }
 
+.logoutButton {
+    border: 1px solid #cbd5e1;
+    background: #fff;
+    color: #334155;
+    padding: 0.45rem 0.85rem;
+    border-radius: 9999px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background-color 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.logoutButton:hover {
+    background-color: #f8fafc;
+    border-color: #94a3b8;
+}
+
 .iconButton {
     background: none;
     border: none;

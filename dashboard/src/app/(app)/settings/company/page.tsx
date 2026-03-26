@@ -1,12 +1,77 @@
 "use client";
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import TopNav from '@/components/TopNav';
 import { API_BASE_URL } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
+import UniversalModal from '@/components/modals/UniversalModal';
+import Cropper, { type Area, type Point, type Size } from 'react-easy-crop';
 import styles from './company.module.css';
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new window.Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('Failed to load image'));
+    img.src = src;
+  });
+}
+
+async function cropImageToFile(params: {
+  imageSrc: string;
+  cropPixels: Area;
+  fileName: string;
+  mimeType?: string;
+  quality?: number;
+  maxSide?: number;
+}): Promise<File> {
+  const { imageSrc, cropPixels, fileName, mimeType = 'image/png', quality = 0.92, maxSide = 1200 } = params;
+  const image = await loadImage(imageSrc);
+
+  const imgW = image.naturalWidth || image.width;
+  const imgH = image.naturalHeight || image.height;
+  if (!imgW || !imgH) throw new Error('Invalid image dimensions');
+
+  const sx = Math.max(0, Math.floor(cropPixels.x));
+  const sy = Math.max(0, Math.floor(cropPixels.y));
+  const sWidth = Math.max(1, Math.min(imgW - sx, Math.ceil(cropPixels.width)));
+  const sHeight = Math.max(1, Math.min(imgH - sy, Math.ceil(cropPixels.height)));
+
+  const maxInSide = Math.max(sWidth, sHeight);
+  const scale = maxInSide > maxSide ? maxSide / maxInSide : 1;
+  const outW = Math.max(1, Math.round(sWidth * scale));
+  const outH = Math.max(1, Math.round(sHeight * scale));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = outW;
+  canvas.height = outH;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Canvas not supported');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+
+  if (mimeType === 'image/jpeg') {
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, outW, outH);
+  }
+
+  ctx.drawImage(image, sx, sy, sWidth, sHeight, 0, 0, outW, outH);
+
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      (b) => {
+        if (!b) return reject(new Error('Failed to export image'));
+        resolve(b);
+      },
+      mimeType,
+      quality,
+    );
+  });
+
+  return new File([blob], fileName, { type: blob.type || mimeType });
+}
 
 type Company = {
   id: string;
@@ -104,10 +169,32 @@ export default function CompanySettingsPage() {
   const [saving, setSaving] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [uploadingDocs, setUploadingDocs] = useState(false);
+  const [uploadingSignature, setUploadingSignature] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [company, setCompany] = useState<Company>(EMPTY_COMPANY);
   const [initialCompany, setInitialCompany] = useState<Company>(EMPTY_COMPANY);
+
+  const [cropOpen, setCropOpen] = useState(false);
+  const [cropTarget, setCropTarget] = useState<'logo' | 'signature' | null>(null);
+  const [cropSrc, setCropSrc] = useState<string | null>(null);
+  const [crop, setCrop] = useState<Point>({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [cropPixels, setCropPixels] = useState<Area | null>(null);
+  const [cropping, setCropping] = useState(false);
+  const [cropSize, setCropSize] = useState<Size | null>(null);
+  const cropAreaRef = useRef<HTMLDivElement | null>(null);
+  const resizeStateRef = useRef<
+    | {
+        handle: 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
+        pointerId: number;
+        startX: number;
+        startY: number;
+        startW: number;
+        startH: number;
+      }
+    | null
+  >(null);
 
   // UI-only fields (kept local so backend payload remains unchanged)
   const [gstRegistered, setGstRegistered] = useState<boolean>(() => {
@@ -262,6 +349,173 @@ export default function CompanySettingsPage() {
     }
   }
 
+  async function uploadSignature(file: File) {
+    setUploadingSignature(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      if (!token) {
+        const url = URL.createObjectURL(file);
+        const doc = { name: 'Signature', url };
+        setCompany((c) => ({ ...c, documents: [...(c.documents || []), doc] }));
+        setSuccess('Signature added (local).');
+        return;
+      }
+
+      const fd = new FormData();
+      fd.append('files', file);
+      const res = await fetch(`${API_BASE_URL}/company/documents`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.message || 'Signature upload failed');
+
+      setCompany((c) => ({ ...c, documents: body.documents }));
+      setSuccess('Signature uploaded');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Signature upload failed';
+      setError(msg);
+    } finally {
+      setUploadingSignature(false);
+    }
+  }
+
+  function startCrop(target: 'logo' | 'signature', file: File) {
+    const src = URL.createObjectURL(file);
+    setCropTarget(target);
+    setCropSrc(src);
+    setCrop({ x: 0, y: 0 });
+    setZoom(1);
+    setCropPixels(null);
+    setCropSize(null);
+    setCropping(false);
+    setCropOpen(true);
+    setError(null);
+    setSuccess(null);
+  }
+
+  function cancelCrop() {
+    if (cropSrc) URL.revokeObjectURL(cropSrc);
+    setCropTarget(null);
+    setCropSrc(null);
+    setCropPixels(null);
+    setCrop({ x: 0, y: 0 });
+    setCropSize(null);
+    setCropping(false);
+    setCropOpen(false);
+  }
+
+  async function confirmCrop() {
+    if (!cropTarget || !cropSrc || !cropPixels) return;
+    setCropping(true);
+    try {
+      const fileName = cropTarget === 'logo' ? 'logo.png' : 'signature.png';
+      const outFile = await cropImageToFile({ imageSrc: cropSrc, cropPixels, fileName, mimeType: 'image/png' });
+
+      if (cropTarget === 'logo') {
+        await uploadLogo(outFile);
+      } else {
+        await uploadSignature(outFile);
+      }
+    } finally {
+      cancelCrop();
+    }
+  }
+
+  useEffect(() => {
+    if (!cropOpen || !cropAreaRef.current || cropSize || !cropTarget) return;
+    const el = cropAreaRef.current;
+    const w = el.clientWidth;
+    const h = el.clientHeight;
+    if (!w || !h) return;
+
+    // Default to a wide rectangle but allow free resizing.
+    const baseW = Math.min(Math.floor(w * 0.78), 520);
+    const baseH = Math.min(Math.floor(h * 0.55), cropTarget === 'logo' ? Math.floor(baseW / 4) : Math.floor(baseW / 3));
+    const next: Size = {
+      width: Math.max(160, Math.min(baseW, w - 24)),
+      height: Math.max(80, Math.min(baseH, h - 24)),
+    };
+    setCropSize(next);
+  }, [cropOpen, cropSize, cropTarget]);
+
+  useEffect(() => {
+    if (!cropOpen) return;
+
+    const onMove = (e: PointerEvent) => {
+      const current = resizeStateRef.current;
+      if (!current) return;
+      if (e.pointerId !== current.pointerId) return;
+      const el = cropAreaRef.current;
+      if (!el) return;
+
+      // Prevent scroll/selection while resizing.
+      e.preventDefault();
+
+      const maxW = Math.max(200, el.clientWidth - 24);
+      const maxH = Math.max(120, el.clientHeight - 24);
+
+      const dx = e.clientX - current.startX;
+      const dy = e.clientY - current.startY;
+
+      let nextW = current.startW;
+      let nextH = current.startH;
+
+      // Crop area is centered by react-easy-crop, so resize symmetrically.
+      if (current.handle.includes('e')) nextW = current.startW + dx * 2;
+      if (current.handle.includes('w')) nextW = current.startW - dx * 2;
+      if (current.handle.includes('s')) nextH = current.startH + dy * 2;
+      if (current.handle.includes('n')) nextH = current.startH - dy * 2;
+
+      nextW = Math.max(160, Math.min(maxW, Math.round(nextW)));
+      nextH = Math.max(80, Math.min(maxH, Math.round(nextH)));
+
+      setCropSize({ width: nextW, height: nextH });
+    };
+
+    const onUp = (e: PointerEvent) => {
+      const current = resizeStateRef.current;
+      if (!current) return;
+      if (e.pointerId !== current.pointerId) return;
+      resizeStateRef.current = null;
+    };
+
+    window.addEventListener('pointermove', onMove, { passive: false });
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    };
+  }, [cropOpen]);
+
+  const cropRectStyle = cropSize
+    ? {
+        left: `calc(50% - ${cropSize.width / 2}px)`,
+        top: `calc(50% - ${cropSize.height / 2}px)`,
+        width: `${cropSize.width}px`,
+        height: `${cropSize.height}px`,
+      }
+    : null;
+
+  function startResize(handle: 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw', e: React.PointerEvent) {
+    if (!cropSize) return;
+    resizeStateRef.current = {
+      handle,
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      startW: cropSize.width,
+      startH: cropSize.height,
+    };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
   async function uploadDocuments(files: FileList) {
     setUploadingDocs(true);
     setError(null);
@@ -332,6 +586,73 @@ export default function CompanySettingsPage() {
             {!loading && error ? <div className={styles.alertError}>{error}</div> : null}
             {!loading && success ? <div className={styles.alertSuccess}>{success}</div> : null}
 
+            <UniversalModal
+              isOpen={cropOpen}
+              title={cropTarget === 'signature' ? 'Crop Signature' : 'Crop Logo'}
+              onClose={cancelCrop}
+              onSubmit={(e) => {
+                e.preventDefault();
+                void confirmCrop();
+              }}
+              primaryLabel={cropping ? 'Cropping…' : 'Use Cropped Image'}
+              primaryDisabled={cropping || !cropSrc || !cropPixels}
+              secondaryLabel="Cancel"
+            >
+              <div className={styles.cropModalBody}>
+                <div className={styles.cropArea}>
+                  {cropSrc ? (
+                    <>
+                      <div ref={cropAreaRef} className={styles.cropStage}>
+                        <Cropper
+                          image={cropSrc}
+                          crop={crop}
+                          zoom={zoom}
+                          cropSize={cropSize ?? undefined}
+                          objectFit="contain"
+                          showGrid={false}
+                          restrictPosition
+                          zoomWithScroll
+                          minZoom={0.2}
+                          maxZoom={3}
+                          onCropChange={setCrop}
+                          onZoomChange={setZoom}
+                          onCropComplete={(_, areaPixels) => setCropPixels(areaPixels)}
+                        />
+
+                        {cropRectStyle ? (
+                          <div className={styles.cropHandleLayer} style={cropRectStyle as React.CSSProperties}>
+                            <div className={styles.cropHandle} data-pos="nw" onPointerDown={(e) => startResize('nw', e)} />
+                            <div className={styles.cropHandle} data-pos="ne" onPointerDown={(e) => startResize('ne', e)} />
+                            <div className={styles.cropHandle} data-pos="sw" onPointerDown={(e) => startResize('sw', e)} />
+                            <div className={styles.cropHandle} data-pos="se" onPointerDown={(e) => startResize('se', e)} />
+                            <div className={styles.cropHandleEdge} data-pos="n" onPointerDown={(e) => startResize('n', e)} />
+                            <div className={styles.cropHandleEdge} data-pos="s" onPointerDown={(e) => startResize('s', e)} />
+                            <div className={styles.cropHandleEdge} data-pos="w" onPointerDown={(e) => startResize('w', e)} />
+                            <div className={styles.cropHandleEdge} data-pos="e" onPointerDown={(e) => startResize('e', e)} />
+                          </div>
+                        ) : null}
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+
+                <div className={styles.cropControls}>
+                  <label className={styles.cropLabel}>Zoom</label>
+                  <input
+                    className={styles.cropRange}
+                    type="range"
+                    min={0.2}
+                    max={3}
+                    step={0.01}
+                    value={zoom}
+                    onChange={(e) => setZoom(Number(e.target.value))}
+                  />
+                </div>
+
+                <div className={styles.muted}>Tip: drag the image to move it. Drag the corners/sides to resize the crop box.</div>
+              </div>
+            </UniversalModal>
+
             <div className={styles.layout}>
               {/* LEFT */}
               <section className={styles.card}>
@@ -351,7 +672,8 @@ export default function CompanySettingsPage() {
                         disabled={uploadingLogo}
                         onChange={(e) => {
                           const f = e.target.files?.[0];
-                          if (f) void uploadLogo(f);
+                          e.currentTarget.value = '';
+                          if (f) startCrop('logo', f);
                         }}
                       />
                       <div className={styles.uploadIcon} aria-hidden>
@@ -539,15 +861,18 @@ export default function CompanySettingsPage() {
                     <input
                       type="file"
                       accept="image/*"
-                      disabled={uploadingDocs}
+                      disabled={uploadingSignature}
                       onChange={(e) => {
-                        const fs = e.target.files;
-                        if (fs && fs.length > 0) void uploadDocuments(fs);
+                        const f = e.target.files?.[0];
+                        e.currentTarget.value = '';
+                        if (f) startCrop('signature', f);
                       }}
                     />
                     <div className={styles.uploadTitle}>+ Add Signature</div>
                     <div className={styles.uploadSub}>Upload an image file</div>
                   </label>
+
+                  {uploadingSignature ? <div className={styles.muted}>Uploading signature…</div> : null}
 
                   <div className={styles.sectionTitle}>Documents</div>
                   <div className={styles.field}>
